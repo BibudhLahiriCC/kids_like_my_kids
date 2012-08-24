@@ -1,4 +1,15 @@
-﻿select re.child_id, re.start_date, (re.end_date - re.start_date) length_of_stay,
+﻿select people.id people_id,  
+     rl.id rl_id,
+     ipq.id ipq_id,  
+     cpfc.id cpfc_id,  
+     cl.id cl_id,
+     cs.id cs_id,
+     cla.id cla_id,  
+     assessments.id assessment_id,  
+ra.id ra_id,  
+aq.id aq_id,  
+eoq.id eoq_id, 
+re.child_id, re.start_date, (re.end_date - re.start_date) length_of_stay,
 extract(year from age(re.start_date, people.date_of_birth)) as age_in_years,
 case when people.multi_racial = 't' then 1 else 0
 end as multi_racial,
@@ -88,18 +99,17 @@ from removal_episodes re
      inner join people on (re.child_id = people.id)
      inner join removal_locations rl on (rl.id = get_first_rem_loc_within_rem_ep(re.child_id, re.start_date))
      left outer join initial_placement_quizzes ipq on (rl.initial_placement_quiz_id = ipq.id)
-     inner join case_plan_focus_children cpfc on (cpfc.person_id = re.child_id)
-     inner join case_plans cl on (cpfc.case_plan_id = cl.id) 
-     inner join cases cs on (cl.case_id = cs.id)
-     inner join case_linked_assessments cla on (cla.case_id = cs.id) 
-     inner join assessments on (cla.assessment_id = assessments.id)
+     left outer join case_plan_focus_children cpfc on (cpfc.person_id = re.child_id)
+     left outer join case_plans cl on (cpfc.case_plan_id = cl.id) 
+     left outer join cases cs on (cl.case_id = cs.id)
+     left outer join case_linked_assessments cla on (cla.case_id = cs.id) 
+     left outer join assessments on (cla.assessment_id = assessments.id)
 left outer join risk_assessments ra on (ra.assessment_id = assessments.id)
 left outer join abuse_quizzes aq on (aq.risk_assessment_id = ra.id)
 left outer join educational_overview_quizzes eoq on (eoq.case_plan_focus_child_id = cpfc.id)
-where re.end_date is null
-and cs.county_id is not null
---and re.child_id = 10000008897
+where re.child_id = 10000008184
 order by re.child_id
 
+--select get_first_rem_loc_within_rem_ep(10000008184, to_date('2004-07-23', 'YYYY-MM-DD'))
 
 
