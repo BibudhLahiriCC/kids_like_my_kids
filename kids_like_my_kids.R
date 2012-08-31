@@ -11,6 +11,7 @@ kids_like_my_kids <- function()
                       " and case_plan_focus_children.case_plan_id = case_plans.id",
                       " order by start_on ",
                       " limit 1) as first_perm_goal,",
+                      " (re.end_date - re.start_date) as length_of_stay,",
                       " case when people.gender = 'Male' then 1",
                       " when people.gender = 'Female' then 0 ",
                       " else null ",
@@ -32,7 +33,7 @@ kids_like_my_kids <- function()
                       " where klmk_metrics.child_id = people.id", 
                       " and re.child_id = klmk_metrics.child_id ",
                       " and re.episode_number = klmk_metrics.episode_number ",
-                      " and re.end_date is not null"
+                      " and re.end_date is not null",
                       sep = "");
 
   res <- dbSendQuery(con, statement);
@@ -42,8 +43,9 @@ kids_like_my_kids <- function()
         function(row) categorize_age(as.numeric(row["age_in_years"])));
 
   dbDisconnect(con);
-  compute_similarity(kid_metrics);
-  cat(paste(compute_distance(kid_metrics[1,], kid_metrics[2,]), "\n", sep = ""));
+  #cat(paste(compute_distance(kid_metrics[1,], kid_metrics[2,]), "\n", sep = ""));
+  fn <- find_kNN(kid_metrics[1, ], kid_metrics[2:20001, ], 1000);
+  return(fn);
 }
 
   categorize_age <- function(age_in_years)
@@ -72,9 +74,6 @@ kids_like_my_kids <- function()
     else
       return(5);
   }
-
-  
-
 
 
 #Compute the number of metrics on which two vectors have identical values, and 
@@ -111,22 +110,91 @@ compute_distance <- function(child_1, child_2)
        both_have_values <- both_have_values + 1;
        if  (child_1[, covariates[i]] != child_2[, covariates[i]])
        {
-         cat(paste("covariate = ", covariates[i], "\n", sep = ""));
+         #cat(paste("covariate = ", covariates[i], "\n", sep = ""));
          non_matching_covariates <- non_matching_covariates + 1;
        }
      }
    }
    if (both_have_values > 0)
    {
-     cat(paste("non_matching_covariates = ", non_matching_covariates, ", both_have_values = ",
-               both_have_values, "\n", sep = ""));
+     #cat(paste("non_matching_covariates = ", non_matching_covariates, ", both_have_values = ",
+     #          both_have_values, "\n", sep = ""));
      return(non_matching_covariates/both_have_values);
    }
    return(-1);
 }
 
+ find_kNN <- function(my_kid, other_kids, k)
+ {
+   n_other_kids <- nrow(other_kids);
+   for (i in 1:n_other_kids)
+   {
+     other_kids[i, "distance_with_my_kid"] <- compute_distance(my_kid, other_kids[i,]);
+   }
+   other_kids <- other_kids[order(other_kids[,"distance_with_my_kid"]),];
+   k_most_similar_kids <- other_kids[1:k, ];
+   cat(paste("LoS for my kid = ", my_kid[, "length_of_stay"], "\n", sep = ""));
+   cat(paste("LoS of most similar kids", "\n", sep = ""));
+   print(cbind(other_kids[, "distance_with_my_kid"], other_kids[, "length_of_stay"]));
+   cat("summary\n");
+   #edges <- c(0, 30, 60, 90, 120, 150, 180, 300, 400, 500, 600, 700, 8000);
+   descriptive_nums <- fivenum(k_most_similar_kids$length_of_stay);
+   filename <- paste("length_of_stay_histogram.png", sep = "");
+   png(filename,  width = 920, height = 960, units = "px");
 
+   histogram <- hist(k_most_similar_kids$length_of_stay, 
+                        #breaks = edges, 
+                        plot = FALSE);
+   customHistogram(histogram = histogram, 
+         mainTitle = "Distribution of length of stay among kids like my kid",
+         xLabel = "length in days", yLabel = "Fraction of children",
+         descriptive_nums);
+   dev.off();
 
+   return(descriptive_nums);
+
+}
+
+customHistogram <- function(histogram, mainTitle, xLabel,
+                            yLabel, fiveNumberSummary, 
+                            queryPoint = as.character(Sys.Date()))
+{
+  #If there are n bars in the histogram, then 
+  #histogram$breaks is an array of (n+1) points, including
+  #the start-point of first bucket and last point of last bucket.
+  #histogram$counts is an array of n numbers.
+  nBars <- length(histogram$counts);
+  totalFreq <- sum(histogram$counts);
+  heights <- histogram$counts/totalFreq;
+  widths <- c();
+  barLabels <- c();
+  xAxisRightEnd <- max(histogram$breaks);
+  width <- ceiling(xAxisRightEnd/nBars);
+  for (i in 1:nBars)
+  {
+    widths[i] <- width;
+    #barLabels[i] <- as.character(histogram$breaks[i+1]);
+    leftPoint <- 0;
+    if (i > 1)
+    {
+      leftPoint <- histogram$breaks[i] + 1; 
+    }
+    barLabels[i] <- paste(as.character(leftPoint),
+                          "-",
+                          as.character(histogram$breaks[i+1]));
+  }
+  subTitle <- paste("Q1 = ", round(fiveNumberSummary[2]),
+                    ", Median = ", round(fiveNumberSummary[3]),
+                    ", Q3 = ", round(fiveNumberSummary[4]),
+                    sep = "");
+  barplot(height = heights, width = widths, xlim = c(0, xAxisRightEnd),
+          beside = TRUE, horiz = FALSE, main = mainTitle, xlab = xLabel,
+          ylab = yLabel, cex.lab = 0.75, space = 0, axisnames = TRUE, cex.names = 0.75,
+          cex.axis = 0.75, cex.main = 0.75, col.main= "blue",
+          names.arg = barLabels, 
+          sub = subTitle, cex.sub = 0.75, col.sub = "red"
+          );
+}
 
 
 
