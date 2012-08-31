@@ -32,29 +32,14 @@ kids_like_my_kids <- function()
                       " where klmk_metrics.child_id = people.id", 
                       " and re.child_id = klmk_metrics.child_id ",
                       " and re.episode_number = klmk_metrics.episode_number ",
+                      " and re.end_date is not null"
                       sep = "");
 
   res <- dbSendQuery(con, statement);
   kid_metrics <- fetch(res, n = -1);
 
-  kid_metrics$age_category_1 <- as.numeric((!is.na(kid_metrics$age_in_years)) & (kid_metrics$age_in_years <= 1));
-  kid_metrics$age_category_2 <- as.numeric((!is.na(kid_metrics$age_in_years)) & (kid_metrics$age_in_years >= 2) & 
-                                           (kid_metrics$age_in_years <= 5));
-  kid_metrics$age_category_3 <- as.numeric((!is.na(kid_metrics$age_in_years)) & (kid_metrics$age_in_years >= 6) & 
-                                           (kid_metrics$age_in_years <= 10));
-  kid_metrics$age_category_4 <- as.numeric((!is.na(kid_metrics$age_in_years)) & (kid_metrics$age_in_years >= 11) & 
-                                           (kid_metrics$age_in_years <= 15));
-  kid_metrics$age_category_5 <- as.numeric((!is.na(kid_metrics$age_in_years)) & (kid_metrics$age_in_years >= 16));
-
   kid_metrics$age_category <- apply(kid_metrics, 1, 
         function(row) categorize_age(as.numeric(row["age_in_years"])));
-
-
-  kid_metrics$prev_rem_ep_0 <- as.numeric(kid_metrics$count_previous_removal_episodes == 0);
-  kid_metrics$prev_rem_ep_1 <- as.numeric(kid_metrics$count_previous_removal_episodes == 1);
-  kid_metrics$prev_rem_ep_2 <- as.numeric(kid_metrics$count_previous_removal_episodes == 2);
-  kid_metrics$prev_rem_ep_3 <- as.numeric(kid_metrics$count_previous_removal_episodes == 3);
-  kid_metrics$prev_rem_ep_4 <- as.numeric(kid_metrics$count_previous_removal_episodes == 4);
 
   dbDisconnect(con);
   compute_similarity(kid_metrics);
@@ -63,19 +48,32 @@ kids_like_my_kids <- function()
 
   categorize_age <- function(age_in_years)
   {
+    #cat(paste("age_in_years = ", age_in_years, "\n", sep = ""));
+    if (is.na(age_in_years))
+    {
+      return(-1);
+    }
     if (age_in_years <= 1)
+    {
       return(1);
-    else if (age_in_years > 1) & (age_in_years <= 5)
+    }
+    else if ((age_in_years > 1) & (age_in_years <= 5))
+    {
       return(2);
-    else if (age_in_years > 5) & (age_in_years <= 10)
+    }
+    else if ((age_in_years > 5) & (age_in_years <= 10))
+    {  
       return(3);
-    else if (age_in_years > 10) & (age_in_years <=15)
+    }
+    else if ((age_in_years > 10) & (age_in_years <=15))
+    {
       return(4);
+    }
     else
       return(5);
   }
 
-
+  
 
 
 
@@ -97,9 +95,9 @@ compute_distance <- function(child_1, child_2)
                    "domestic_violence_reported", 
                    "count_previous_removal_episodes",
                    "initial_placement_setting",
-                   "gender", "age_category_1", "age_category_2", "age_category_3", "age_category_4",
-                   "age_category_5", "prev_rem_ep_0", "prev_rem_ep_1", "prev_rem_ep_2", "prev_rem_ep_3",
-                   "prev_rem_ep_4", "multi_racial", "american_indian", "white", "black", "pacific_islander",
+                   "gender", "age_category",
+                   "count_previous_removal_episodes", "multi_racial", "american_indian", 
+                   "white", "black", "pacific_islander",
                    "asian");
    n_covariates <- length(covariates);
    non_matching_covariates <- 0;
