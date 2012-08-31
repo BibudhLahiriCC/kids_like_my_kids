@@ -44,14 +44,17 @@ kids_like_my_kids <- function()
 
   dbDisconnect(con);
   #cat(paste(compute_distance(kid_metrics[1,], kid_metrics[2,]), "\n", sep = ""));
-  #N_values <- c(1000, 5000, 20000);
-  #k_values <- c(100, 2000, 5000);
-  #for (i in 1:3)
-  #{
-  #  fn <- find_kNN(kid_metrics[1, ], kid_metrics[2:(N_values[i] + 1), ], N_values[i], k_values[i]);
-  #}
-  #return(fn);
-  histograms_by_dimensions(kid_metrics);
+  N_values <- c(1000, 5000, 20000);
+  k_values <- c(100, 2000, 5000);
+  alpha_values <- c(0.1, 0.2, 0.3);
+  N <- nrow(kid_metrics);
+  for (i in 1:3)
+  {
+    #fn <- find_kNN(kid_metrics[1, ], kid_metrics[2:(N_values[i] + 1), ], N_values[i], k_values[i]);
+    find_NN_by_threshold(kid_metrics[1, ], kid_metrics[2:N, ], N = N, alpha = alpha_values[i]);
+  }
+  return(fn);
+  #histograms_by_dimensions(kid_metrics);
 }
 
   categorize_age <- function(age_in_years)
@@ -87,7 +90,9 @@ kids_like_my_kids <- function()
 #and a removal episode.
 compute_distance <- function(child_1, child_2)
 {
-   covariates <- c("family_structure_single_female", "family_structure_single_male",
+   if (FALSE)
+   {
+     covariates <- c("family_structure_single_female", "family_structure_single_male",
                    "family_structure_married_couple",
                    "family_structure_unmarried_couple",
                    "parent_alcohol_abuse",
@@ -104,6 +109,12 @@ compute_distance <- function(child_1, child_2)
                    "count_previous_removal_episodes", "multi_racial", "american_indian", 
                    "white", "black", "pacific_islander",
                    "asian");
+   }
+   #Checking the covariates that seem to have significant influence
+   covariates <- c("age_category", "american_indian", "asian", "black", "child_disability",
+                   "count_previous_removal_episodes", "family_structure_married_couple", 
+                   "family_structure_single_female", "parent_alcohol_abuse",
+                   "parent_drug_abuse", "white");
    n_covariates <- length(covariates);
    non_matching_covariates <- 0;
    both_have_values <- 0;
@@ -143,15 +154,36 @@ compute_distance <- function(child_1, child_2)
    cat(paste("LoS of most similar kids", "\n", sep = ""));
    print(cbind(other_kids[, "distance_with_my_kid"], other_kids[, "length_of_stay"]));
    cat("summary\n");
-   descriptive_nums <- histogram_for_similar_kids(k_most_similar_kids, N, k); 
+   descriptive_nums <- histogram_for_similar_kids(k_most_similar_kids, N = N, k = k); 
    return(descriptive_nums);
 
 }
 
-  histogram_for_similar_kids <- function(k_most_similar_kids, N, k)
+  find_NN_by_threshold <- function(my_kid, other_kids, N, alpha)
+ {
+   cat(paste("N = ", N, ", alpha = ", alpha, "\n", sep = ""));
+   n_other_kids <- nrow(other_kids);
+   for (i in 1:n_other_kids)
+   {
+     other_kids[i, "distance_with_my_kid"] <- compute_distance(my_kid, other_kids[i,]);
+     if (i%%100 == 0)
+     {
+       cat(paste("computed for ", i, " kids\n", sep = ""));
+     }
+   }
+   most_similar_kids <- subset(other_kids, (other_kids$distance_with_my_kid <= alpha));
+   cat(paste("LoS for my kid = ", my_kid[, "length_of_stay"], "\n", sep = ""));
+   #cat(paste("LoS of most similar kids", "\n", sep = ""));
+   #print(cbind(other_kids[, "distance_with_my_kid"], other_kids[, "length_of_stay"]));
+   descriptive_nums <- histogram_for_similar_kids(most_similar_kids, N = N, alpha = alpha); 
+   return(descriptive_nums);
+ }
+
+
+  histogram_for_similar_kids <- function(k_most_similar_kids, N, k, alpha)
   {
    descriptive_nums <- fivenum(k_most_similar_kids$length_of_stay);
-   filename <- paste("length_of_stay_histogram_", N, "_", k, ".png", sep = "");
+   filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", k, ".png", sep = "");
    png(filename,  width = 920, height = 960, units = "px");
 
    histogram <- hist(k_most_similar_kids$length_of_stay, 
@@ -230,25 +262,30 @@ customHistogram <- function(histogram, mainTitle, xLabel,
       n_covariates <- length(covariates);
       for (i in 1:n_covariates)
       {
+          cat(paste("covariate = ", covariates[i], "\n", sep = ""));
           filename <- paste("./histograms_by_dimensions/length_of_stay_by_", covariates[i],".png", sep = "");
           png(filename,  width = 920, height = 960, units = "px");
           distinct_values <- unique(kid_metrics[, covariates[i]]);
           distinct_values <- distinct_values[!is.na(distinct_values)];
-          n_distinct_values <- length(distinct_values);
-          par(mfrow=c(n_distinct_values, 1));
-          for (j in 1:n_distinct_values)
+          n_distinct_values <- min(5, length(distinct_values));
+          cat(paste("n_distinct_values = ", n_distinct_values, "\n", sep = ""));
+          if (n_distinct_values > 0)
           {
-            cat(paste("covariate = ", covariates[i], ", value = ", distinct_values[j], "\n", sep = ""));
-            kid_metrics_this_value <- subset(kid_metrics, (kid_metrics[, covariates[i]] == distinct_values[j]));
-            cat(paste("nrow = ", nrow(kid_metrics_this_value), ", ncol = ",
-                      ncol(kid_metrics_this_value), "\n", sep = ""));
-            histogram <- hist(kid_metrics_this_value$length_of_stay, 
-                                  plot = FALSE);
-            customHistogram(histogram = histogram, 
-                             mainTitle = paste("LoS for ", nrow(kid_metrics_this_value), 
-                                               " children with ", covariates[i], " = ", distinct_values[j], sep = ""),
-                             xLabel = "length in days", yLabel = "Fraction of children",
-                             fivenum(kid_metrics_this_value$length_of_stay));
+            par(mfrow=c(n_distinct_values, 1));
+            for (j in 1:n_distinct_values)
+            {
+              cat(paste("covariate = ", covariates[i], ", value = ", distinct_values[j], "\n", sep = ""));
+              kid_metrics_this_value <- subset(kid_metrics, (kid_metrics[, covariates[i]] == distinct_values[j]));
+              cat(paste("nrow = ", nrow(kid_metrics_this_value), ", ncol = ",
+                        ncol(kid_metrics_this_value), "\n", sep = ""));
+              histogram <- hist(kid_metrics_this_value$length_of_stay, 
+                                    plot = FALSE);
+              customHistogram(histogram = histogram, 
+                               mainTitle = paste("LoS for ", nrow(kid_metrics_this_value), 
+                                                 " children with ", covariates[i], " = ", distinct_values[j], sep = ""),
+                               xLabel = "length in days", yLabel = "Fraction of children",
+                               fivenum(kid_metrics_this_value$length_of_stay));
+            }
           }
           dev.off();
       }
