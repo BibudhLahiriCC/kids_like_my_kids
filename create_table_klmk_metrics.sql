@@ -8,8 +8,12 @@ create table klmk_metrics(
  family_structure_unmarried_couple smallint,
  parent_alcohol_abuse boolean,
  parent_drug_abuse boolean,
+ child_behavioral_problem boolean,
+ child_disability boolean,
  case_county_id bigint,
  assessment_county_id bigint,
  primary_caregiver_has_mental_health_problem boolean,
- domestic_violence_reported boolean 
+ domestic_violence_reported boolean, 
+ count_previous_removal_episodes smallint,
+ initial_placement_setting varchar(255)
 );
