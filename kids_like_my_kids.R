@@ -42,19 +42,24 @@ kids_like_my_kids <- function()
   kid_metrics$age_category <- apply(kid_metrics, 1, 
         function(row) categorize_age(as.numeric(row["age_in_years"])));
 
-  dbDisconnect(con);
   #cat(paste(compute_distance(kid_metrics[1,], kid_metrics[2,]), "\n", sep = ""));
-  N_values <- c(1000, 5000, 20000);
-  k_values <- c(100, 2000, 5000);
-  alpha_values <- c(0.1, 0.2, 0.3);
-  N <- nrow(kid_metrics);
-  for (i in 1:3)
+  
+  if (FALSE)
   {
-    #fn <- find_kNN(kid_metrics[1, ], kid_metrics[2:(N_values[i] + 1), ], N_values[i], k_values[i]);
-    find_NN_by_threshold(kid_metrics[1, ], kid_metrics[2:N, ], N = N, alpha = alpha_values[i]);
+    N_values <- c(1000, 5000, 20000);
+    k_values <- c(100, 2000, 5000);
+    alpha_values <- c(0.1, 0.2, 0.3);
+    N <- nrow(kid_metrics);
+    for (i in 1:3)
+    {
+      #fn <- find_kNN(kid_metrics[1, ], kid_metrics[2:(N_values[i] + 1), ], N_values[i], k_values[i]);
+      find_NN_by_threshold(kid_metrics[1, ], kid_metrics[2:N, ], N = N, alpha = alpha_values[i]);
+    }
   }
+  fn <- find_NN_by_threshold_with_precomputed_distance(con, 10000008184, 0.05);
   return(fn);
   #histograms_by_dimensions(kid_metrics);
+  dbDisconnect(con);
 }
 
   categorize_age <- function(age_in_years)
@@ -159,6 +164,10 @@ compute_distance <- function(child_1, child_2)
 
 }
 
+
+   #Find the nearest kids to a given kid who have distance within alpha, and
+   #plot the histograms of LoS for the other kids, and compare with my kid.
+
   find_NN_by_threshold <- function(my_kid, other_kids, N, alpha)
  {
    cat(paste("N = ", N, ", alpha = ", alpha, "\n", sep = ""));
@@ -183,12 +192,21 @@ compute_distance <- function(child_1, child_2)
   histogram_for_similar_kids <- function(k_most_similar_kids, N, k, alpha)
   {
    descriptive_nums <- fivenum(k_most_similar_kids$length_of_stay);
-   filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", k, ".png", sep = "");
-   png(filename,  width = 920, height = 960, units = "px");
+   if (!is.na(k))
+   {
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", k, ".png", sep = "");
+   }
+   if (!is.na(alpha))
+   {
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", alpha, ".png", sep = "");
+   }
+   #cat(paste("max = ", max(k_most_similar_kids$length_of_stay)));
 
+   png(filename,  width = 920, height = 960, units = "px");
+   edges <- c(0, 120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1500, 2000, 3000, 6000, 8000);
    histogram <- hist(k_most_similar_kids$length_of_stay, 
-                        #breaks = edges, 
-                        plot = FALSE);
+                     breaks = edges, 
+                     plot = FALSE);
    customHistogram(histogram = histogram, 
          mainTitle = "Distribution of LoS among kids like my kid",
          xLabel = "length in days", yLabel = "Fraction of children",
@@ -299,4 +317,42 @@ customHistogram <- function(histogram, mainTitle, xLabel,
   #of the k NNs, and then find the difference of the median LoS with the LoS of the test kid. 
 
 
+  #Using precomputed distances from the DB. 
+  find_NN_by_threshold_with_precomputed_distance <- function(con, my_kid, alpha)
+  {
+     cat(paste("alpha = ", alpha, "\n", sep = ""));
+     statement <- paste("select (re1.end_date - re1.start_date) length_of_stay ",
+                        " from pairwise_distances, removal_episodes re1 ",
+                        " where (child_id_2 = re1.child_id) ",
+                        " and (child_id_1 = ", my_kid, ")",
+                        " and (distance >= 0 and distance <= ", alpha, ")",
+                        " union",
+                        " select (re2.end_date - re2.start_date) length_of_stay",
+                        " from pairwise_distances, removal_episodes re2",
+                        " where (child_id_1 = re2.child_id)",
+                        " and (child_id_2 = ", my_kid, ")",
+                        " and (distance >= 0 and distance <= ", alpha, ")", sep = "");
+     res <- dbSendQuery(con, statement);
+     similar_kids <- fetch(res, n = -1);
+     most_similar_kids <- subset(similar_kids, !is.na(similar_kids$length_of_stay));
+     descriptive_nums <- histogram_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), 
+                         k = NA, alpha = alpha); 
+     survival_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), alpha);
+     return(descriptive_nums);
+  }
+
+
+   survival_for_similar_kids <- function(k_most_similar_kids, N, alpha)
+  {
+    library(survival);
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_survival_", N, "_", alpha, ".png", sep = "");
+   #cat(paste("max = ", max(k_most_similar_kids$length_of_stay)));
+
+   png(filename,  width = 920, height = 960, units = "px");
+   fit1 <- survfit(Surv(length_of_stay)~1, data = k_most_similar_kids,
+                     type = 'kaplan-meier');
+   print(summary(fit1));
+   plot(fit1);
+   dev.off();
+  }
  
