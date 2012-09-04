@@ -57,8 +57,8 @@ create function compute_pairwise_distances() returns void as $$
     and re.child_id = klmk_metrics.child_id 
     and re.episode_number = klmk_metrics.episode_number
     and re.end_date is not null
-    order by klmk_metrics.child_id, klmk_metrics.episode_number
-    limit 100;
+    order by klmk_metrics.child_id, klmk_metrics.episode_number;
+    --limit 100;
 
   curToCompareDistanceWith cursor(v_child_id bigint, v_episode_number integer) is
     select klmk_metrics.child_id, klmk_metrics.episode_number, 
@@ -89,8 +89,8 @@ create function compute_pairwise_distances() returns void as $$
       /*Compute the distance with children with a higher child_id,
         or, if the child_id's are same, then the other one should have 
         a higher removal episode number.*/
-        raise notice 'my kid id = %, episode number = %',
-            kids_and_rem_eps.child_id, kids_and_rem_eps.episode_number;
+        /*raise notice 'my kid id = %, episode number = %',
+            kids_and_rem_eps.child_id, kids_and_rem_eps.episode_number;*/
 
         for compare_distance_with in curToCompareDistanceWith
             (kids_and_rem_eps.child_id, kids_and_rem_eps.episode_number) loop
@@ -201,12 +201,12 @@ create function compute_pairwise_distances() returns void as $$
                 distance);
                 
         end loop;
-        n_recs_processed := n_recs_processed + 1;
-        --if (n_recs_processed % 100 = 0) then
+        /*n_recs_processed := n_recs_processed + 1;
+        if (n_recs_processed % 100 = 0) then
          select substring(timeofday() from 1 for 19) into current_t;
          raise notice 'n_recs_processed = %, current time = %', n_recs_processed, 
                current_t;
-        --end if;
+        end if;*/
     end loop;
   end;
 $$ LANGUAGE plpgsql;
