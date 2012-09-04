@@ -337,8 +337,10 @@ customHistogram <- function(histogram, mainTitle, xLabel,
      most_similar_kids <- subset(similar_kids, !is.na(similar_kids$length_of_stay));
      descriptive_nums <- histogram_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), 
                          k = NA, alpha = alpha); 
-     survival_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), alpha);
-     return(descriptive_nums);
+     fit1 <- survival_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), alpha);
+     find_most_likely_LoS_value(fit1, 30);
+     #return(descriptive_nums);
+     return(fit1);
   }
 
 
@@ -351,8 +353,50 @@ customHistogram <- function(histogram, mainTitle, xLabel,
    png(filename,  width = 920, height = 960, units = "px");
    fit1 <- survfit(Surv(length_of_stay)~1, data = k_most_similar_kids,
                      type = 'kaplan-meier');
-   print(summary(fit1));
+   #print(summary(fit1));
    plot(fit1);
    dev.off();
+   return(fit1);
+  }
+
+  find_most_likely_LoS_value <- function(survival_object, stepsize)
+  {
+    n_time_points <- length(survival_object$time);
+    start_index <- 1;
+    end_index <- start_index + stepsize - 1;
+   
+    max_slope <- 0;
+    start_time_max_slope <- 0;
+    end_time_max_slope <- 0;
+  
+    while (end_index <= n_time_points)
+    {
+      start_time <- survival_object$time[start_index];
+      end_time <- survival_object$time[end_index];
+      start_probability <- survival_object$surv[start_index];
+      end_probability <- survival_object$surv[end_index];
+
+      local_slope <- round((start_probability - end_probability)/(end_time - start_time), 4);
+      if (local_slope > max_slope)
+      {
+        max_slope <- local_slope;
+        start_time_max_slope <- start_time;
+        end_time_max_slope <- end_time;
+      }
+      cat(paste("start_index = ", start_index, ", end_index = ", end_index, 
+                  ", start_time = ", start_time, ", end_time = ", end_time,
+                  ", start_probability = ", start_probability, 
+                  ", end_probability = ", end_probability,  
+                  ", local_slope = ", local_slope, ", max_slope = ", 
+                  max_slope, "\n", sep = ""));
+
+      start_index <- end_index + 1;
+      end_index <- start_index + stepsize - 1;
+
+      #cat(paste("start_index = ", start_index, ", end_index = ", end_index, "\n", sep = ""));
+    }
+    most_likely_LoS_value <- (start_time_max_slope + end_time_max_slope)/2;
+    cat(paste("most_likely_LoS_value = ", most_likely_LoS_value, "\n", sep = ""));
+    return(most_likely_LoS_value);
   }
  
