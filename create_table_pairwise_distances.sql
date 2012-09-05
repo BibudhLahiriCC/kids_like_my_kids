@@ -11,4 +11,3 @@ create index idx_child_id_1 on pairwise_distances using btree(child_id_1, episod
 create index idx_child_id_2 on pairwise_distances using btree(child_id_2, episode_number_2);
 
 create index idx_distance on pairwise_distances using btree(trunc(distance, 2));
-create index idx_rem_ep_child_id_episode_number on removal_episodes using btree(child_id, episode_number);

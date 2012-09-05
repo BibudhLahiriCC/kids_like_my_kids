@@ -129,6 +129,8 @@
     n_contacts_in_rem_ep integer,
     n_visits_in_rem_ep integer
   );
+  create index idx_rem_ep_child_id_episode_number on removal_episodes 
+  using btree(child_id, episode_number);
 
   drop table if exists table_event_in_rem_ep;
   create 
