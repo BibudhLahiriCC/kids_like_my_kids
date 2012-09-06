@@ -4,10 +4,10 @@ kids_like_my_kids <- function()
   con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
                    port="5438", dbname="casebook2_production");
 
-  statement <- paste("select klmk_metrics.*,",
+  statement <- paste("select klmk_metrics_copy.*,",
                       " (select case_plan_focus_children.permanency_goal",
                       " from case_plan_focus_children, case_plans",
-                      " where klmk_metrics.child_id = case_plan_focus_children.person_id",
+                      " where klmk_metrics_copy.child_id = case_plan_focus_children.person_id",
                       " and case_plan_focus_children.case_plan_id = case_plans.id",
                       " order by start_on ",
                       " limit 1) as first_perm_goal,",
@@ -29,10 +29,10 @@ kids_like_my_kids <- function()
                       " end as pacific_islander,",
                       " case when people.asian = 't' then 1 else 0", 
                       " end as asian",
-                      " from klmk_metrics, people, removal_episodes re",
-                      " where klmk_metrics.child_id = people.id", 
-                      " and re.child_id = klmk_metrics.child_id ",
-                      " and re.episode_number = klmk_metrics.episode_number ",
+                      " from klmk_metrics_copy, people, removal_episodes_copy re",
+                      " where klmk_metrics_copy.child_id = people.id", 
+                      " and re.child_id = klmk_metrics_copy.child_id ",
+                      " and re.episode_number = klmk_metrics_copy.episode_number ",
                       " and re.end_date is not null",
                       sep = "");
 
@@ -42,8 +42,13 @@ kids_like_my_kids <- function()
   kid_metrics$age_category <- apply(kid_metrics, 1, 
         function(row) categorize_age(as.numeric(row["age_in_years"])));
 
-  #cat(paste(compute_distance(kid_metrics[1,], kid_metrics[2,]), "\n", sep = ""));
-  
+  if (FALSE)
+  {
+    kid_10000008184 <- subset(kid_metrics, (kid_metrics$child_id == 10000008184));
+    kid_10000008453 <- subset(kid_metrics, (kid_metrics$child_id == 10000008453));
+
+    cat(paste(compute_distance(kid_10000008184, kid_10000008453), "\n", sep = ""));
+  }
   if (FALSE)
   {
     N_values <- c(1000, 5000, 20000);
@@ -56,8 +61,18 @@ kids_like_my_kids <- function()
       find_NN_by_threshold(kid_metrics[1, ], kid_metrics[2:N, ], N = N, alpha = alpha_values[i]);
     }
   }
-  fn <- find_NN_by_threshold_with_precomputed_distance(con, 10000008184, 0.05);
-  return(fn);
+  if (FALSE)
+  {
+    my_kids <- c(10000008184, 10000008453, 10000009076, 10000010086, 
+               10000010559, 10000011200, 10000011887, 10000012377,
+               10000012932, 10000013642, 10000014664);
+
+    for (i in 1:11)
+    {
+     find_NN_by_threshold_with_precomputed_distance(con, my_kids[i], 0.05);
+    }
+  }
+  #return(fn);
   #histograms_by_dimensions(kid_metrics);
   dbDisconnect(con);
 }
@@ -108,16 +123,16 @@ compute_distance <- function(child_1, child_2)
                    "assessment_county_id",
                    "primary_caregiver_has_mental_health_problem",
                    "domestic_violence_reported", 
-                   "count_previous_removal_episodes",
+                   "count_previous_removal_episodes_copy",
                    "initial_placement_setting",
                    "gender", "age_category",
-                   "count_previous_removal_episodes", "multi_racial", "american_indian", 
+                   "count_previous_removal_episodes_copy", "multi_racial", "american_indian", 
                    "white", "black", "pacific_islander",
                    "asian");
    }
    #Checking the covariates that seem to have significant influence
    covariates <- c("age_category", "american_indian", "asian", "black", "child_disability",
-                   "count_previous_removal_episodes", "family_structure_married_couple", 
+                   "count_previous_removal_episodes_copy", "family_structure_married_couple", 
                    "family_structure_single_female", "parent_alcohol_abuse",
                    "parent_drug_abuse", "white");
    n_covariates <- length(covariates);
@@ -189,22 +204,24 @@ compute_distance <- function(child_1, child_2)
  }
 
 
-  histogram_for_similar_kids <- function(k_most_similar_kids, N, k, alpha)
+  histogram_for_similar_kids <- function(my_kid, k_most_similar_kids, N, k, alpha)
   {
    descriptive_nums <- fivenum(k_most_similar_kids$length_of_stay);
    if (!is.na(k))
    {
-    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", k, ".png", sep = "");
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", my_kid, "_", N, "_", k, ".png", sep = "");
    }
    if (!is.na(alpha))
    {
-    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_", N, "_", alpha, ".png", sep = "");
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_histogram_",  my_kid, "_", N, "_", alpha, ".png", sep = "");
    }
    #cat(paste("max = ", max(k_most_similar_kids$length_of_stay)));
 
    png(filename,  width = 920, height = 960, units = "px");
-   edges <- c(0, 120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1500, 2000, 3000, 6000, 8000);
-   histogram <- hist(k_most_similar_kids$length_of_stay, 
+   truncated_data <- subset(k_most_similar_kids, (k_most_similar_kids$length_of_stay <= 2000));
+   #edges <- c(0, 120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1500, 2000, 3000, 6000, 8000);
+   edges <- seq(0, 2040, by = 120);
+   histogram <- hist(truncated_data$length_of_stay, 
                      breaks = edges, 
                      plot = FALSE);
    customHistogram(histogram = histogram, 
@@ -271,10 +288,10 @@ customHistogram <- function(histogram, mainTitle, xLabel,
                    "assessment_county_id",
                    "primary_caregiver_has_mental_health_problem",
                    "domestic_violence_reported", 
-                   "count_previous_removal_episodes",
+                   "count_previous_removal_episodes_copy",
                    "initial_placement_setting",
                    "gender", "age_category",
-                   "count_previous_removal_episodes", "multi_racial", "american_indian", 
+                   "count_previous_removal_episodes_copy", "multi_racial", "american_indian", 
                    "white", "black", "pacific_islander",
                    "asian");
       n_covariates <- length(covariates);
@@ -322,32 +339,33 @@ customHistogram <- function(histogram, mainTitle, xLabel,
   {
      cat(paste("alpha = ", alpha, "\n", sep = ""));
      statement <- paste("select (re1.end_date - re1.start_date) length_of_stay ",
-                        " from pairwise_distances, removal_episodes re1 ",
+                        " from pairwise_distances_copy, removal_episodes_copy re1 ",
                         " where (child_id_2 = re1.child_id) ",
                         " and (child_id_1 = ", my_kid, ")",
                         " and (distance >= 0 and distance <= ", alpha, ")",
                         " union",
                         " select (re2.end_date - re2.start_date) length_of_stay",
-                        " from pairwise_distances, removal_episodes re2",
+                        " from pairwise_distances_copy, removal_episodes_copy re2",
                         " where (child_id_1 = re2.child_id)",
                         " and (child_id_2 = ", my_kid, ")",
                         " and (distance >= 0 and distance <= ", alpha, ")", sep = "");
      res <- dbSendQuery(con, statement);
      similar_kids <- fetch(res, n = -1);
      most_similar_kids <- subset(similar_kids, !is.na(similar_kids$length_of_stay));
-     descriptive_nums <- histogram_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), 
+     descriptive_nums <- histogram_for_similar_kids(my_kid, most_similar_kids, N = nrow(most_similar_kids), 
                          k = NA, alpha = alpha); 
-     fit1 <- survival_for_similar_kids(most_similar_kids, N = nrow(most_similar_kids), alpha);
+     fit1 <- survival_for_similar_kids(my_kid, most_similar_kids, N = nrow(most_similar_kids), alpha);
      find_most_likely_LoS_value(fit1, 30);
      #return(descriptive_nums);
      return(fit1);
   }
 
 
-   survival_for_similar_kids <- function(k_most_similar_kids, N, alpha)
+   survival_for_similar_kids <- function(my_kid, k_most_similar_kids, N, alpha)
   {
     library(survival);
-    filename <- paste("./LoS_for_similar_kids/length_of_stay_survival_", N, "_", alpha, ".png", sep = "");
+    filename <- paste("./LoS_for_similar_kids/length_of_stay_survival_", my_kid, "_", 
+                       N, "_", alpha, ".png", sep = "");
    #cat(paste("max = ", max(k_most_similar_kids$length_of_stay)));
 
    png(filename,  width = 920, height = 960, units = "px");
@@ -383,20 +401,112 @@ customHistogram <- function(histogram, mainTitle, xLabel,
         start_time_max_slope <- start_time;
         end_time_max_slope <- end_time;
       }
-      cat(paste("start_index = ", start_index, ", end_index = ", end_index, 
+      if (FALSE)
+      {
+        cat(paste("start_index = ", start_index, ", end_index = ", end_index, 
                   ", start_time = ", start_time, ", end_time = ", end_time,
                   ", start_probability = ", start_probability, 
                   ", end_probability = ", end_probability,  
                   ", local_slope = ", local_slope, ", max_slope = ", 
                   max_slope, "\n", sep = ""));
-
+      }
       start_index <- end_index + 1;
       end_index <- start_index + stepsize - 1;
 
       #cat(paste("start_index = ", start_index, ", end_index = ", end_index, "\n", sep = ""));
     }
     most_likely_LoS_value <- (start_time_max_slope + end_time_max_slope)/2;
-    cat(paste("most_likely_LoS_value = ", most_likely_LoS_value, "\n", sep = ""));
+    #cat(paste("most_likely_LoS_value = ", most_likely_LoS_value, "\n", sep = ""));
     return(most_likely_LoS_value);
   }
+
+
+  generate_summary_statistics <- function()
+  {
+     library(RPostgreSQL);
+     library(survival);
+     con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
+                   port="5438", dbname="casebook2_production");
+     statement <- paste("select distinct child_id_1 my_kid_id, episode_number_1, ",
+                        "(removal_episodes_copy.end_date - removal_episodes_copy.start_date) actual_los ",
+                        "from pairwise_distances_copy, removal_episodes_copy ",
+                        "where pairwise_distances_copy.child_id_1 = removal_episodes_copy.child_id ",
+                        "and pairwise_distances_copy.episode_number_1 = removal_episodes_copy.episode_number ",
+                        "order by child_id_1, episode_number_1", sep = "");
+      res <- dbSendQuery(con, statement);
+      my_kids <- fetch(res, n = -1);
+      #print(my_kids);
+      n_my_kids <- nrow(my_kids);
+      summary_columns <- c("my_kid", "actual_los", "Q1_similar_kids",
+                           "median_similar_kids", "Q3_similar_kids", "most_likely_los");
+      #summary_statistics <- mat.or.vec(n_my_kids, length(summary_columns));
+      #summary_statistics <- data.frame(matrix(nrow= n_my_kids, 
+      #                                  ncol = length(summary_columns)));
+      summary_statistics <- data.frame();
+      alpha <- 0.1;
+      for (i in 1:n_my_kids)
+      {
+        my_kid <- my_kids[i, "my_kid_id"];
+        statement <- paste("select (re1.end_date - re1.start_date) length_of_stay ",
+                        " from pairwise_distances_copy, removal_episodes_copy re1 ",
+                        " where (child_id_2 = re1.child_id) ",
+                        " and (child_id_1 = ", my_kid, ")",
+                        " and (distance >= 0 and distance <= ", alpha, ")",
+                        " union",
+                        " select (re2.end_date - re2.start_date) length_of_stay",
+                        " from pairwise_distances_copy, removal_episodes_copy re2",
+                        " where (child_id_1 = re2.child_id)",
+                        " and (child_id_2 = ", my_kid, ")",
+                        " and (distance >= 0 and distance <= ", alpha, ")", sep = "");
+       res <- dbSendQuery(con, statement);
+       similar_kids <- fetch(res, n = -1);
+
+       most_similar_kids <- subset(similar_kids, !is.na(similar_kids$length_of_stay));
+       descriptive_nums <- fivenum(most_similar_kids$length_of_stay);
+
+       fit1 <- survfit(Surv(length_of_stay)~1, data = most_similar_kids,
+                     type = 'kaplan-meier');
  
+       if (FALSE)
+       {
+         summary_statistics[i, "my_kid"] <- my_kid;
+         cat(paste(summary_statistics[i, "my_kid"], "\n", sep = ""));
+         
+
+         summary_statistics[i, "actual_LoS"] <- as.numeric(my_kids[i, "actual_LoS"]);
+         summary_statistics[i, "Q1_similar_kids"] <- descriptive_nums[2];
+         summary_statistics[i, "median_similar_kids"] <- descriptive_nums[3];
+         summary_statistics[i, "Q3_similar_kids"] <- descriptive_nums[4];
+         summary_statistics[i, "most_likely_LoS"] <- find_most_likely_LoS_value(fit1, 30);
+       }
+       #cat(paste(my_kids[i, "actual_LoS"], "\n", sep = ""));
+       row <- c(my_kid, my_kids[i, "actual_los"], descriptive_nums[2], descriptive_nums[3],
+                descriptive_nums[4], find_most_likely_LoS_value(fit1, 30));
+       summary_statistics <- rbind(summary_statistics, row);
+      }
+      colnames(summary_statistics) <- summary_columns;
+      
+      measure_relative_errors(summary_statistics);
+      dbDisconnect(con);
+  }
+ 
+
+  measure_relative_errors <- function(summ_stats)
+  {
+    summ_stats$relative_error_for_Q1 <- 
+       abs((summ_stats$actual_los - summ_stats$Q1_similar_kids)/summ_stats$actual_los);
+
+    summ_stats$relative_error_for_median <- 
+       abs((summ_stats$actual_los - summ_stats$median_similar_kids)/summ_stats$actual_los);
+
+    summ_stats$relative_error_for_Q3 <- 
+       abs((summ_stats$actual_los - summ_stats$Q3_similar_kids)/summ_stats$actual_los);
+    print(summ_stats);
+
+    cat(paste("median relative error from Q1 = ", 
+               round(median(summ_stats$relative_error_for_Q1), 3), 
+               ", median relative error from median = ", 
+               round(median(summ_stats$relative_error_for_median), 3),
+               ", median relative error from Q3 = ", 
+               round(median(summ_stats$relative_error_for_Q3), 3), "\n", sep = ""));
+  }
