@@ -74,6 +74,7 @@ kids_like_my_kids <- function()
   }
   #return(fn);
   #histograms_by_dimensions(kid_metrics);
+  find_clusters(kid_metrics);
   dbDisconnect(con);
 }
 
@@ -123,16 +124,16 @@ compute_distance <- function(child_1, child_2)
                    "assessment_county_id",
                    "primary_caregiver_has_mental_health_problem",
                    "domestic_violence_reported", 
-                   "count_previous_removal_episodes_copy",
+                   "count_previous_removal_episodes",
                    "initial_placement_setting",
                    "gender", "age_category",
-                   "count_previous_removal_episodes_copy", "multi_racial", "american_indian", 
+                   "multi_racial", "american_indian", 
                    "white", "black", "pacific_islander",
                    "asian");
    }
    #Checking the covariates that seem to have significant influence
    covariates <- c("age_category", "american_indian", "asian", "black", "child_disability",
-                   "count_previous_removal_episodes_copy", "family_structure_married_couple", 
+                   "count_previous_removal_episodes", "family_structure_married_couple", 
                    "family_structure_single_female", "parent_alcohol_abuse",
                    "parent_drug_abuse", "white");
    n_covariates <- length(covariates);
@@ -288,10 +289,10 @@ customHistogram <- function(histogram, mainTitle, xLabel,
                    "assessment_county_id",
                    "primary_caregiver_has_mental_health_problem",
                    "domestic_violence_reported", 
-                   "count_previous_removal_episodes_copy",
+                   "count_previous_removal_episodes",
                    "initial_placement_setting",
                    "gender", "age_category",
-                   "count_previous_removal_episodes_copy", "multi_racial", "american_indian", 
+                   "multi_racial", "american_indian", 
                    "white", "black", "pacific_islander",
                    "asian");
       n_covariates <- length(covariates);
@@ -509,4 +510,18 @@ customHistogram <- function(histogram, mainTitle, xLabel,
                round(median(summ_stats$relative_error_for_median), 3),
                ", median relative error from Q3 = ", 
                round(median(summ_stats$relative_error_for_Q3), 3), "\n", sep = ""));
+  }
+
+  find_clusters <- function(kid_metrics)
+  {
+    library(klaR);
+    covariates <- c("age_category", "american_indian", "asian", "black", "child_disability",
+                   "count_previous_removal_episodes", "family_structure_married_couple", 
+                   "family_structure_single_female", "parent_alcohol_abuse",
+                   "parent_drug_abuse", "white");
+    kid_metrics <- kid_metrics[, covariates];
+    cat(paste("nrow(kid_metrics) = ", nrow(kid_metrics), ", ncol(kid_metrics) = ",
+              ncol(kid_metrics), "\n", sep = ""));
+    cl <- kmodes(kid_metrics, 5, iter.max = 3);
+    plot(jitter(kid_metrics), col = cl$cluster); 
   }
