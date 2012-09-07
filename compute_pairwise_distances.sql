@@ -24,13 +24,75 @@ create function categorize_age(integer) returns integer as $$
   end;
 $$ LANGUAGE plpgsql;
 
+drop type if exists type_frequency_of_category cascade;
+create type type_frequency_of_category as
+(
+  covariate varchar(100),
+  value smallint, --will be 1, 0 or null
+  frequency bigint
+);
+
+
+drop function if exists store_frequencies_of_categories();
+create function store_frequencies_of_categories() RETURNS type_frequency_of_category[] as $$
+ declare
+   
+   --age_category and race to be handled differently
+
+   n_covariates smallint := 0;
+   array_index smallint := 0;
+   i smallint;
+   frequencies_of_categories type_frequency_of_category array[100] = '{}';
+   frequency_of_category type_frequency_of_category;
+   covariate_value smallint;
+   frequency bigint;
+   n_frequencies_of_categories integer;
+   statement varchar(2000) := null;
+   curFrequenciesOfValues refcursor;
+
+   covariates varchar(100) array[100] := '{"child_disability", "count_previous_removal_episodes", 
+                   "family_structure_married_couple", "family_structure_single_female", "parent_alcohol_abuse",
+                   "parent_drug_abuse"}';
+ 
+ begin
+   select array_length(covariates, 1) into n_covariates;
+
+     for i in 1..n_covariates loop
+
+        statement := 'select cast(' || covariates[i] || ' as integer), count(*) ' || 'from klmk_metrics_copy ' ||
+                     'group by cast(' || covariates[i] || ' as integer)';
+
+        open curFrequenciesOfValues for execute statement;
+
+        loop
+            array_index := array_index + 1;
+            fetch curFrequenciesOfValues into covariate_value, frequency;
+
+            IF NOT FOUND THEN
+              EXIT; -- exit loop
+            END IF;
+
+            frequency_of_category := row(covariates[i], covariate_value, frequency);
+            select array_append(frequencies_of_categories, frequency_of_category) 
+             into frequencies_of_categories; 
+        end loop;
+      close curFrequenciesOfValues;
+     end loop;
+
+    /*select array_length(frequencies_of_categories, 1) into n_frequencies_of_categories;
+    for i in 1..n_frequencies_of_categories loop
+       return next frequencies_of_categories[i];
+    end loop;*/
+    return frequencies_of_categories;
+ end;
+$$ LANGUAGE plpgsql;
 
 
 drop function if exists compute_pairwise_distances();
 create function compute_pairwise_distances() returns void as $$
   declare
 
-   non_matching_covariates integer;
+   non_matching_covariates integer; --the simple matching coefficient
    both_have_values integer;
    distance numeric(6, 4);
    n_recs_processed integer := 0;
