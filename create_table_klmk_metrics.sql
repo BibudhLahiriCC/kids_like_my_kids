@@ -6,7 +6,6 @@ create table klmk_metrics(
  age_category smallint,
  black smallint,
  white smallint,
- multi_racial smallint, 
  american_indian smallint,
  pacific_islander smallint,
  asian smallint, 

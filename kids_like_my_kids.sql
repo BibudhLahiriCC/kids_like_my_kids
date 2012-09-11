@@ -128,8 +128,81 @@ create function from_abuse_quizzes(bigint, bigint) returns void as $$
   end;
 $$ LANGUAGE plpgsql;
 
+drop function if exists categorize_age(integer);
+create function categorize_age(integer) returns integer as $$
+  declare
+    age_in_years alias for $1;
+  begin
+    if (age_in_years is null) then
+      return(null);
+    end if;
+    if (age_in_years <= 1) then
+      return(1);
+    end if;
+    if ((age_in_years > 1) AND (age_in_years <= 5)) then
+      return(2);
+    end if;
+    if ((age_in_years > 5) AND (age_in_years <= 10)) then
+      return(3);
+    end if;
+    if ((age_in_years > 10) AND (age_in_years <=15)) then
+      return(4);
+    end if;
+    if (age_in_years > 15) then
+      return(5);
+    end if;
+  end;
+$$ LANGUAGE plpgsql;
+
+
+drop function if exists code_child_race(bigint,bigint,boolean, boolean, boolean, boolean, boolean, boolean);
+CREATE FUNCTION code_child_race(bigint,bigint,boolean, boolean, boolean, boolean, boolean, boolean) RETURNS void as $$
+
+  declare
+  v_child_id alias for $1;
+  v_episode_number alias for $2;
+  v_multi_racial alias for $3;
+  v_white alias for $4; 
+  v_black alias for $5;
+  v_american_indian alias for $6;
+  v_pacific_islander alias for $7;
+  v_asian alias for $8;
+
+begin
+     
+     if not (v_american_indian is null and
+        v_white is null and
+        v_black is null and
+        v_pacific_islander is null and
+        v_asian is null and
+        v_multi_racial is null)
+     then
+         update klmk_metrics
+         set white =
+            (case when v_white = 't' then 1
+            else 0 end),
+             black = 
+            (case when v_black = 't' then 1
+            else 0 end),
+            american_indian = 
+            (case when v_american_indian = 't' then 1
+            else 0 end),
+            pacific_islander =
+            (case when v_pacific_islander = 't' then 1
+            else 0 end),
+            asian =
+            (case when v_asian = 't' then 1
+            else 0 end)
+         where child_id = v_child_id
+         and episode_number = v_episode_number;
+      end if;
+end;
+$$ LANGUAGE plpgsql;
+
+
 drop function if exists metrics_for_kids_like_my_kids();
 CREATE FUNCTION metrics_for_kids_like_my_kids() RETURNS void AS $$
+
   declare
     age_in_years integer := 0;
     v_first_rem_loc_id bigint;
@@ -141,15 +214,24 @@ CREATE FUNCTION metrics_for_kids_like_my_kids() RETURNS void AS $$
 
 
     curKidsWithRemEps cursor for
-      select re.child_id, re.episode_number, re.start_date, (re.end_date - re.start_date) length_of_stay
-      from removal_episodes re
+      select re.child_id, re.episode_number, re.start_date, p.multi_racial, p.white, 
+             p.black, p.american_indian, p.pacific_islander, p.asian,
+      case when p.gender = 'Male' then 1 
+           when p.gender = 'Female' then 0
+           else null
+           end as gender,
+      (re.end_date - re.start_date) length_of_stay, 
+      categorize_age(cast(extract(year from age(re.start_date, p.date_of_birth)) as integer)) 
+                as age_category
+      from removal_episodes re, people p
+      where re.child_id = p.id
       order by re.child_id, re.episode_number;
       
     begin
       for kid_with_rem_ep in curKidsWithRemEps loop
      
-        insert into klmk_metrics (child_id, episode_number) 
-        values (kid_with_rem_ep.child_id, kid_with_rem_ep.episode_number);
+        insert into klmk_metrics (child_id, episode_number,age_category,gender) 
+        values (kid_with_rem_ep.child_id, kid_with_rem_ep.episode_number,kid_with_rem_ep.age_category,kid_with_rem_ep.gender);
 
         select count(*) into n_previous_removal_episodes
         from removal_episodes re_prev 
@@ -173,7 +255,9 @@ CREATE FUNCTION metrics_for_kids_like_my_kids() RETURNS void AS $$
                   kid_with_rem_ep.episode_number);*/
         perform get_domestic_violence(kid_with_rem_ep.child_id, 
                   kid_with_rem_ep.episode_number);
-
+        perform code_child_race(kid_with_rem_ep.child_id, 
+                  kid_with_rem_ep.episode_number,kid_with_rem_ep.multi_racial,kid_with_rem_ep.white,kid_with_rem_ep.black,
+                  kid_with_rem_ep.american_indian,kid_with_rem_ep.pacific_islander,kid_with_rem_ep.asian);
         update klmk_metrics
         set count_previous_removal_episodes = n_previous_removal_episodes,
             initial_placement_setting = v_initial_placement_setting

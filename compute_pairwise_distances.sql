@@ -1,29 +1,3 @@
-drop function if exists categorize_age(integer);
-create function categorize_age(integer) returns integer as $$
-  declare
-    age_in_years alias for $1;
-  begin
-    if (age_in_years is null) then
-      return(null);
-    end if;
-    if (age_in_years <= 1) then
-      return(1);
-    end if;
-    if ((age_in_years > 1) AND (age_in_years <= 5)) then
-      return(2);
-    end if;
-    if ((age_in_years > 5) AND (age_in_years <= 10)) then
-      return(3);
-    end if;
-    if ((age_in_years > 10) AND (age_in_years <=15)) then
-      return(4);
-    end if;
-    if (age_in_years > 15) then
-      return(5);
-    end if;
-  end;
-$$ LANGUAGE plpgsql;
-
 drop type if exists type_frequency_of_category cascade;
 create type type_frequency_of_category as
 (
