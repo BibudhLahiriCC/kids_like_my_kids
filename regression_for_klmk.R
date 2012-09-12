@@ -3,6 +3,7 @@ regression_for_klmk <- function()
   library(RPostgreSQL);
   con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
                    port="5438", dbname="casebook2_production");
+  initial_months <- 6;
   statement <- paste("select age_category, american_indian, asian, black, ",
                      "case when child_disability = 't' then 1 ",
                            "when child_disability = 'f' then 0 ",
@@ -23,7 +24,12 @@ regression_for_klmk <- function()
                      " where re.child_id = rl.person_id ",
                      " and rl.type = 'RemovalLocation::Placement' ",
                      " and date(rl.started_at) >= re.start_date ",
-                     "and (rl.ended_at is null or date(rl.ended_at) <= re.end_date)) as n_placements ",
+                     "and (rl.ended_at is null or date(rl.ended_at) <= re.end_date)) as n_placements, ",
+                     "(select count(*) from removal_locations rl ",
+                     " where re.child_id = rl.person_id ",
+                     " and rl.type = 'RemovalLocation::Placement' ",
+                     " and date(rl.started_at) between re.start_date ",
+                     " and (re.start_date + ", initial_months, "*30)) as n_plcmnts_in_initial_months ", 
                      "from klmk_metrics km, removal_episodes re ",
                      " where km.child_id = re.child_id",
                      " and km.episode_number = re.episode_number ",
@@ -39,24 +45,37 @@ regression_for_klmk <- function()
                      " and parent_drug_abuse is not null ",
                      "and white is not null ",
                       sep = "");
+
+  #cat(statement);
   res <- dbSendQuery(con, statement);
   kids_with_los <- fetch(res, n = -1);
+  print(kids_with_los[1:10, ]);
   kids_with_los$los_in_month <- kids_with_los$length_of_stay/30;
   kids_with_los$placements_per_month <- 
      kids_with_los$n_placements/kids_with_los$los_in_month;
+  create_linear_model(kids_with_los);
+  dbDisconnect(con);
+  drops <- c("length_of_stay", "los_in_month", "n_placements");
+  kids_with_los <- kids_with_los[,!(names(kids_with_los) %in% drops)];
+  print(colnames(kids_with_los));
+  subset_selection <- find_best_covariates(kids_with_los);
+  return(subset_selection);
+}
 
-  if (FALSE)
-  {
-   linearModel <- lm(length_of_stay ~ factor(age_category) + factor(american_indian) + 
-                                     factor(asian) + factor(black) + factor(child_disability) +
-                     count_previous_removal_episodes + placements_per_month + factor(family_structure_married_couple) +
-                     factor(family_structure_single_female) + factor(parent_alcohol_abuse) +
-                     factor(parent_drug_abuse) + factor(white), kids_with_los);
-  }
-  linearModel <- lm(length_of_stay ~ factor(age_category) + 
-                     count_previous_removal_episodes + 
-                     factor(parent_alcohol_abuse) +
-                     factor(white), kids_with_los);
+create_linear_model <- function(kids_with_los)
+{
+  linearModel <- lm(length_of_stay ~ 
+                     factor(age_category) 
+                      + factor(american_indian)
+                      + factor(asian)
+                      + factor(black)
+                      + factor(child_disability)
+                      + count_previous_removal_episodes
+                      + factor(family_structure_married_couple)
+                      + factor(parent_alcohol_abuse)
+                      + n_plcmnts_in_initial_months
+                      + placements_per_month
+                     , kids_with_los);
 
   print(summary(linearModel));
 
@@ -66,12 +85,6 @@ regression_for_klmk <- function()
        abs(linearModel$residuals/linearModel$observed_los);
   cat(paste("median relative error = ", 
                round(median(linearModel$relative_error), 3), "\n", sep = ""));
-  dbDisconnect(con);
-  drops <- c("length_of_stay", "los_in_month");
-  kids_with_los <- kids_with_los[,!(names(kids_with_los) %in% drops)];
-
-  #subset_selection <- find_best_covariates(kids_with_los);
-  #return(subset_selection);
 }
 
 
@@ -79,22 +92,6 @@ regression_for_klmk <- function()
 find_best_covariates <- function(kids_with_los)
 {
   library(subselect);
-
-  if (FALSE)
-  {
-    kids_with_los$age_category <- factor(kids_with_los$age_category);
-    kids_with_los$american_indian <- factor(kids_with_los$american_indian);
-    kids_with_los$asian <- factor(kids_with_los$asian);
-    kids_with_los$black <- factor(kids_with_los$black);
-    kids_with_los$child_disability <- factor(kids_with_los$child_disability);
-    kids_with_los$family_structure_married_couple <- 
-        factor(kids_with_los$family_structure_married_couple);
-    kids_with_los$family_structure_single_female <- 
-        factor(kids_with_los$family_structure_single_female);
-    kids_with_los$parent_alcohol_abuse <- factor(kids_with_los$parent_alcohol_abuse);
-    kids_with_los$parent_drug_abuse <- factor(kids_with_los$parent_drug_abuse);
-    kids_with_los$white <- factor(kids_with_los$white);
-  }
   correlation_matrix <- cor(kids_with_los);
   #print(eigen(correlation_matrix));
   eleaps(correlation_matrix,nsol=3, criterion="RM");

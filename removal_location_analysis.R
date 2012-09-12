@@ -103,3 +103,80 @@ customHistogram <- function(histogram, mainTitle, xLabel,
           );
 }
 
+
+n_placements_initial_months <- function()
+{
+  library(RPostgreSQL);
+  con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
+                   port="5438", dbname="casebook2_production");
+  initial_month_values <- c(1, 2, 3, 6, 9, 12);
+  n_initial_month_values <- length(initial_month_values);
+
+  for (i in 1:n_initial_month_values)
+  {
+    filename <- paste("./removal_location_analysis/initial_month_analysis_", initial_month_values[i], 
+                ".png", sep = "");
+    png(filename,  width = 920, height = 960, units = "px");
+
+    statement <- paste("select re.child_id, re.start_date, re.end_date, ",
+                       "cast((re.end_date - re.start_date) as numeric)/30 as los_in_months,",
+                       "(select count(*) from removal_locations rl ",
+                       " where re.child_id = rl.person_id ",
+                       " and rl.type = 'RemovalLocation::Placement'",
+                       " and date(rl.started_at) between re.start_date ",
+                       " and (re.start_date + ", initial_month_values[i], "*30)) as n_plcmnts_in_initial_months ", 
+                       " from removal_episodes re ",
+                       " where re.end_date is not null", sep = "");
+    #cat(statement);
+    res <- dbSendQuery(con, statement);
+    kids_with_rem_locs <- fetch(res, n = -1);
+    kids_with_rem_locs <- subset(kids_with_rem_locs, (kids_with_rem_locs$n_plcmnts_in_initial_months > 0
+                                                      & kids_with_rem_locs$los_in_months <= 60));
+    plot(kids_with_rem_locs$n_plcmnts_in_initial_months, 
+         kids_with_rem_locs$los_in_months);
+    dev.off();
+  }
+  dbDisconnect(con); 
+}
+
+
+n_placements_first_six_months <- function()
+{
+  library(RPostgreSQL);
+  con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
+                   port="5438", dbname="casebook2_production");
+  filename <- paste("./removal_location_analysis/six_month_analysis",  
+                ".png", sep = "");
+  png(filename,  width = 920, height = 960, units = "px");
+  par(mfrow=c(7, 1));
+
+  statement <- paste("select re.child_id, re.start_date, re.end_date, ",
+                       "(re.end_date - re.start_date) as los,",
+                       "(select count(*) from removal_locations rl ",
+                       " where re.child_id = rl.person_id ",
+                       " and rl.type = 'RemovalLocation::Placement'",
+                       " and date(rl.started_at) between re.start_date ",
+                       " and (re.start_date + 180)) as n_plcmnts_in_initial_months ", 
+                       " from removal_episodes re ",
+                       " where re.end_date is not null", sep = "");
+    #cat(statement);
+  res <- dbSendQuery(con, statement);
+  kids_with_rem_locs <- fetch(res, n = -1);
+
+  for (n_moves in 1:7)
+  {
+    kids_with_n_moves <- subset(kids_with_rem_locs, 
+           (kids_with_rem_locs$n_plcmnts_in_initial_months == n_moves));
+    histogram <- hist(kids_with_n_moves$los, 
+                                    plot = FALSE);
+    customHistogram(histogram = histogram, 
+                     mainTitle = paste("LoS for ", nrow(kids_with_n_moves), 
+                                       " children with ", n_moves, " moves in first 6 months", sep = ""),
+                     xLabel = "LoS in days", yLabel = "Fraction of children",
+                     fivenum(kids_with_n_moves$los));
+  }
+  dev.off();
+  dbDisconnect(con); 
+}
+
+
