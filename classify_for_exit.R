@@ -91,11 +91,22 @@ classify_for_exit <- function()
   print(summary(kids.logr));
   logistic_function <- predict(kids.logr, type = "response");
   classification_result <- as.numeric(logistic_function >= 0.5);
-  n_correct_classifications <- sum(kids_with_los$reunification == classification_result);
-  cat(paste("n_correct_classifications = ", n_correct_classifications,
-             " , total classifications = ", length(classification_result),
-             ", percentage of correct classifications = ", 
-             n_correct_classifications/length(classification_result), "\n", sep = ""));
+
+  positives <- sum(kids_with_los$reunification == 1);
+  negatives <- sum(kids_with_los$reunification == 0);
+  true_positives <- sum(((kids_with_los$reunification == 1) & 
+                        (kids_with_los$reunification == classification_result)));
+  false_positives <- sum(((kids_with_los$reunification == 0) & 
+                        (kids_with_los$reunification != classification_result)));
+  true_negatives <- sum(((kids_with_los$reunification == 0) & 
+                        (kids_with_los$reunification == classification_result)));
+  false_negatives <- sum(((kids_with_los$reunification == 1) & 
+                        (kids_with_los$reunification != classification_result)));
+  cat(paste("true_positives = ", true_positives, ", false_positives = ", false_positives,
+            ", true_negatives = ", true_negatives, ", false_negatives = ", false_negatives,
+            ", precision = ", (true_positives/(true_positives + false_positives)),
+            ", recall = ", (true_positives/(true_positives + false_negatives)), "\n", sep = ""));
+
   return(classification_result);
 }
 
