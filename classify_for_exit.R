@@ -69,6 +69,13 @@ classify_for_exit <- function()
   kids_with_los$age_category_3 <- as.numeric(kids_with_los$age_category == 4);
   kids_with_los$age_category_4 <- as.numeric(kids_with_los$age_category == 5);
 
+  poss_perm_outcomes <- c("tpa", "relative", "reunification", "emancipation",
+                                    "guardianship", "entering_cc", "death", "adoption",
+                                    "runaway");
+  poss_perm_outcomes_as_in_DB <- c("TPA", "Relative", "Reunification", 
+                                   "Emancipation", "Guardianship", "Entering_CC",
+                                   "Death", "Adoption", "Runaway");
+
   kids_with_los$tpa <- as.numeric(kids_with_los$processed_permanency_outcome == 'TPA');
   kids_with_los$relative <- as.numeric(kids_with_los$processed_permanency_outcome == 'Relative');
   kids_with_los$reunification <- as.numeric(kids_with_los$processed_permanency_outcome == 'Reunification');
@@ -79,35 +86,97 @@ classify_for_exit <- function()
   kids_with_los$adoption <- as.numeric(kids_with_los$processed_permanency_outcome == 'Adoption');
   kids_with_los$runaway <- as.numeric(kids_with_los$processed_permanency_outcome == 'Runaway');
 
-
+  n_poss_perm_outcomes <- length(poss_perm_outcomes);
+  for (i in 1:n_poss_perm_outcomes)
+  {
+      cat(paste("i = ", i, ", poss_perm_outcomes[i] = ", poss_perm_outcomes[i], "\n", sep = ""));
+      formula_string <- paste("factor(", poss_perm_outcomes[i],
+                                        ") ~ n_plcmnts_in_initial_months + ",
+                                        "factor(age_category_1) + ",
+                                      "factor(age_category_2) + factor(age_category_3) + ",
+                                      "factor(age_category_4) + ",
+                                      "count_previous_removal_episodes + factor(black) ",
+                                      "+ factor(child_disability) + ",
+                                      "factor(parent_alcohol_abuse)", sep = "");
+      this_formula <- as.formula(formula_string);
+            kids.logr <- glm(this_formula, 
+                       family = binomial("logit"), data = kids_with_los);
+      print(summary(kids.logr));
+      probability_column_name <- paste(poss_perm_outcomes[i], "_probs", sep = "");
+      kids_with_los[[probability_column_name]] <- predict(kids.logr, type = "response");
+  }
   dbDisconnect(con);
-  kids.logr <- glm(factor(reunification) ~ n_plcmnts_in_initial_months + factor(age_category_1) + 
-                          factor(age_category_2) + factor(age_category_3) +
-                          factor(age_category_4) +
-                          count_previous_removal_episodes + factor(black) 
-                          + factor(child_disability) + 
-                          factor(parent_alcohol_abuse), 
-                  family=binomial("logit"), data = kids_with_los);
-  print(summary(kids.logr));
-  logistic_function <- predict(kids.logr, type = "response");
-  classification_result <- as.numeric(logistic_function >= 0.5);
 
-  positives <- sum(kids_with_los$reunification == 1);
-  negatives <- sum(kids_with_los$reunification == 0);
-  true_positives <- sum(((kids_with_los$reunification == 1) & 
-                        (kids_with_los$reunification == classification_result)));
-  false_positives <- sum(((kids_with_los$reunification == 0) & 
-                        (kids_with_los$reunification != classification_result)));
-  true_negatives <- sum(((kids_with_los$reunification == 0) & 
-                        (kids_with_los$reunification == classification_result)));
-  false_negatives <- sum(((kids_with_los$reunification == 1) & 
-                        (kids_with_los$reunification != classification_result)));
-  cat(paste("true_positives = ", true_positives, ", false_positives = ", false_positives,
-            ", true_negatives = ", true_negatives, ", false_negatives = ", false_negatives,
-            ", precision = ", (true_positives/(true_positives + false_positives)),
-            ", recall = ", (true_positives/(true_positives + false_negatives)), "\n", sep = ""));
+  #For each row, identify the probability column that has highest value, 
+  #and store its name in a different column
+  if (FALSE)
+  {
+      n_kids_with_los <- nrow(kids_with_los);
+      for (i in 1:n_kids_with_los)
+      {
+         max_prob <- 0;
+         for (j in 1:n_poss_perm_outcomes)
+         {
+           probability_column_name <- paste(poss_perm_outcomes[j], "_probs", sep = "");
+           if (kids_with_los[i, probability_column_name] > max_prob)
+           {
+             max_prob <- kids_with_los[i, probability_column_name];
+             kids_with_los[i, "predicted_perm_outcome"] <- poss_perm_outcomes_as_in_DB[j];
+           }
+         }
+         if (i %% 100 == 0)
+         {
+           cat(paste(i, " records processed", "\n", sep = ""));
+         }
+      }
+  }
+  probability_column_names <- paste(poss_perm_outcomes, "_probs", sep = "");
+  kids_with_los$max_likely_outcome_col_index <- max.col(kids_with_los[, probability_column_names]);
+  kids_with_los$predicted_perm_outcome <- poss_perm_outcomes_as_in_DB[kids_with_los$max_likely_outcome_col_index];
+  #print(kids_with_los[1:20, ]);
 
-  return(classification_result);
+  #Create the matrix of micro-average precision and recall
+  precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 1, n_poss_perm_outcomes + 1);
+  rownames(precision_recall_matrix) <- append(poss_perm_outcomes_as_in_DB, "Micro-avg precision");
+  colnames(precision_recall_matrix) <- append(poss_perm_outcomes_as_in_DB, "Micro-avg recall");
+  for (i in 1:n_poss_perm_outcomes)
+  {
+    actual_outcome <- poss_perm_outcomes_as_in_DB[i];
+    for (j in 1:n_poss_perm_outcomes)
+    {
+      predicted_outcome <- poss_perm_outcomes_as_in_DB[j];
+      precision_recall_matrix[actual_outcome, predicted_outcome] <- 
+        sum(((kids_with_los[, "processed_permanency_outcome"] == actual_outcome)
+            & (kids_with_los[, "predicted_perm_outcome"] == predicted_outcome)));
+    }
+  }
+  for (j in 1:n_poss_perm_outcomes)
+  {
+    colsum <- sum(precision_recall_matrix[, j]);
+    if (colsum > 0) 
+    {
+      precision_recall_matrix["Micro-avg precision", j] <- 
+        round(precision_recall_matrix[j, j]/colsum, 2);
+    }
+    else
+    {
+      precision_recall_matrix["Micro-avg precision", j] <- 0;
+    }
+  }
+  for (i in 1:n_poss_perm_outcomes)
+  {
+    rowsum <- sum(precision_recall_matrix[i, ]);
+    if (rowsum > 0) 
+    {
+      precision_recall_matrix[i, "Micro-avg recall"] <- 
+        round(precision_recall_matrix[i, i]/rowsum, 2);  
+    }
+    else
+    {
+      precision_recall_matrix[i, "Micro-avg recall"] <- 0;
+    }
+  }
+  print(precision_recall_matrix);
 }
 
 
