@@ -49,6 +49,12 @@ regression_for_klmk <- function()
   #cat(statement);
   res <- dbSendQuery(con, statement);
   kids_with_los <- fetch(res, n = -1);
+
+  kids_with_los$age_category_1 <- as.numeric(kids_with_los$age_category == 2);
+  kids_with_los$age_category_2 <- as.numeric(kids_with_los$age_category == 3);
+  kids_with_los$age_category_3 <- as.numeric(kids_with_los$age_category == 4);
+  kids_with_los$age_category_4 <- as.numeric(kids_with_los$age_category == 5);
+
   kids_with_los$los_in_month <- kids_with_los$length_of_stay/30;
   kids_with_los$placements_per_month <- 
      kids_with_los$n_placements/kids_with_los$los_in_month;
@@ -64,9 +70,9 @@ regression_for_klmk <- function()
   #print(correlation_matrix);
   cat(paste("base_error_rate = ", compute_base_error_rate(kids_with_los),
              "\n", sep = ""));
-  linear_model_with_k_fold_cross_validation(kids_with_los, 10);
+  #linear_model_with_k_fold_cross_validation(kids_with_los, 10);
 
-  #linearModel <- create_linear_model(kids_with_los);
+  linearModel <- create_linear_model(kids_with_los);
   #ridge_regression(kids_with_los);
   dbDisconnect(con);
   drops <- c(
@@ -95,18 +101,35 @@ compute_base_error_rate <- function(kids_with_los)
 
 create_linear_model <- function(kids_with_los)
 {
+  #Not using "factor"
   if (FALSE)
   {
-    #The top 6 covariates that minimized the AIC most
     linearModel <- lm(length_of_stay ~  
-                      n_plcmnts_in_initial_months + factor(age_category) + 
-                          count_previous_removal_episodes + factor(black) 
-                          + factor(child_disability) + 
-                          factor(parent_alcohol_abuse),
+                      n_plcmnts_in_initial_months + age_category_1 + 
+                          age_category_2 + age_category_3 +
+                          age_category_4 +
+                          count_previous_removal_episodes + black
+                          + child_disability + 
+                          parent_alcohol_abuse,
                           kids_with_los);
   }
+    #The top 6 covariates that minimized the AIC most
+    linearModel <- lm(length_of_stay ~  
+                      n_plcmnts_in_initial_months + factor(age_category_1) + 
+                          factor(age_category_2) + factor(age_category_3) +
+                          factor(age_category_4) +
+                          count_previous_removal_episodes + factor(black) 
+                          + factor(child_disability) + 
+                          factor(parent_alcohol_abuse) +
+                          n_plcmnts_in_initial_months*factor(age_category_2) + 
+                          n_plcmnts_in_initial_months*factor(age_category_4) + 
+                          n_plcmnts_in_initial_months*count_previous_removal_episodes +
+                          n_plcmnts_in_initial_months*factor(child_disability), 
+                          kids_with_los);
   #Full model
-  linearModel <- lm(length_of_stay ~ factor(age_category) 
+  if (FALSE)
+  {
+   linearModel <- lm(length_of_stay ~ factor(age_category) 
                           + factor(american_indian)
                           + factor(asian)
                           + factor(black)
@@ -118,7 +141,7 @@ create_linear_model <- function(kids_with_los)
                           + factor(parent_drug_abuse) 
                           + n_plcmnts_in_initial_months
                           , kids_with_los);
-
+  }
 
   print(summary(linearModel));
   cat(paste("average prediction error with this model = ", 
