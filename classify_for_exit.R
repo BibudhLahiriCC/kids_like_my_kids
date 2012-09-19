@@ -1,3 +1,5 @@
+poss_perm_outcomes <<- NA;
+
 classify_for_exit <- function()
 {
   library(RPostgreSQL);
@@ -31,14 +33,17 @@ classify_for_exit <- function()
                      " and rl.type = 'RemovalLocation::Placement' ",
                      " and date(rl.started_at) between re.start_date ",
                      " and (re.start_date + ", initial_months, "*30)) as n_plcmnts_in_initial_months, ",
-                     "case when fn_remove_legacy(permanency_outcome) = 'Child is entering the Collaborative Care Program' then 'Entering_CC'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Runaway with Wardship Dismissed' then 'Runaway'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Transfer of Placement and Care to Another Indiana State Agency' then 'TPA'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Permanent Placement with a Relative' then 'Relative'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Death of Child' then 'Death'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Reunification' then 'Reunification'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Legally Removed from Parent(s)' then 'Legally_Removed'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Rights Terminated for Parent(s)' then 'TPR'",
+                     "case when fn_remove_legacy(permanency_outcome) = 'Child is entering the Collaborative Care Program' then 'entering_cc'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Runaway with Wardship Dismissed' then 'runaway'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Transfer of Placement and Care to Another Indiana State Agency' then 'tpa'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Permanent Placement with a Relative' then 'relative'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Death of Child' then 'death'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Reunification' then 'reunification'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Legally Removed from Parent(s)' then 'legally_removed'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Rights Terminated for Parent(s)' then 'tpr'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Adoption' then 'adoption'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Emancipation' then 'emancipation'",
+                                "when fn_remove_legacy(permanency_outcome) = 'Guardianship' then 'guardianship'",
                                 "else permanency_outcome",
                      " end as processed_permanency_outcome",
                      " from klmk_metrics km, removal_episodes re, ", 
@@ -62,7 +67,6 @@ classify_for_exit <- function()
                      " and permanency_outcome is not null",
                       sep = "");
 
-  #cat(statement);
   res <- dbSendQuery(con, statement);
   kids_with_permanency <- fetch(res, n = -1);
   cat(paste("nrow(kids_with_permanency) = ", nrow(kids_with_permanency), "\n", sep = ""));
@@ -71,37 +75,37 @@ classify_for_exit <- function()
   kids_with_permanency$age_category_2 <- as.numeric(kids_with_permanency$age_category == 3);
   kids_with_permanency$age_category_3 <- as.numeric(kids_with_permanency$age_category == 4);
   kids_with_permanency$age_category_4 <- as.numeric(kids_with_permanency$age_category == 5);
-
-  poss_perm_outcomes <- c("tpa", "relative", "reunification", "emancipation",
-                                    "guardianship", "entering_cc", "death", "adoption",
-                                    "runaway", "legally_removed", "tpr");
-  poss_perm_outcomes_as_in_DB <- c("TPA", "Relative", "Reunification", 
-                                   "Emancipation", "Guardianship", "Entering_CC",
-                                   "Death", "Adoption", "Runaway", "Legally_Removed", "TPR");
-
-  kids_with_permanency$tpa <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'TPA');
-  kids_with_permanency$relative <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Relative');
-  kids_with_permanency$reunification <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Reunification');
-  kids_with_permanency$emancipation <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Emancipation');
-  kids_with_permanency$guardianship <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Guardianship');
-  kids_with_permanency$entering_cc <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Entering_CC');
-  kids_with_permanency$death <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Death');
-  kids_with_permanency$adoption <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Adoption');
-  kids_with_permanency$runaway <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'Runaway');
-  kids_with_permanency$legally_removed <- 
-    as.numeric(kids_with_permanency$processed_permanency_outcome == 'Legally_Removed');
-  kids_with_permanency$tpr <- as.numeric(kids_with_permanency$processed_permanency_outcome == 'TPR');
+ 
+  poss_perm_outcomes <<- unique(kids_with_permanency$processed_permanency_outcome);
+  n_poss_perm_outcomes <- length(poss_perm_outcomes);
+  for (i in 1:n_poss_perm_outcomes)
+  {
+    kids_with_permanency[, poss_perm_outcomes[i]] <- 
+      as.numeric(kids_with_permanency$processed_permanency_outcome == poss_perm_outcomes[i]);
+  }
 
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
-  classify(kids_with_permanency, poss_perm_outcomes, poss_perm_outcomes_as_in_DB);
+  classify(kids_with_permanency, poss_perm_outcomes);
   dbDisconnect(con);
   #return(count_by_perm_outcome);
 }
 
 
-classify <- function(kids_with_permanency, poss_perm_outcomes, poss_perm_outcomes_as_in_DB)
+classify <- function(kids_with_permanency, poss_perm_outcomes)
 {
-   n_poss_perm_outcomes <- length(poss_perm_outcomes);
+  #Keep the numeric (includes coded categorical) covariates only and scale them.
+  covariates <- colnames(kids_with_permanency);
+  columns_to_remove <- c("age_category", "child_id_episode_number", "processed_permanency_outcome", 
+                         "random_number", "sampled");
+  #Store the permanency outcomes in a vector, before removing the column from the data frame, 
+  #so that we can use them later while computing precision and recall
+
+  original_permanency_outcomes <- kids_with_permanency$processed_permanency_outcome;
+
+  kids_with_permanency <- kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
+  kids_with_permanency <- as.data.frame(scale(kids_with_permanency));
+  
+  n_poss_perm_outcomes <- length(poss_perm_outcomes);
   for (i in 1:n_poss_perm_outcomes)
   {
       cat(paste("i = ", i, ", poss_perm_outcomes[i] = ", poss_perm_outcomes[i], "\n", sep = ""));
@@ -116,7 +120,6 @@ classify <- function(kids_with_permanency, poss_perm_outcomes, poss_perm_outcome
       this_formula <- as.formula(formula_string);
             kids.logr <- glm(this_formula, 
                        family = binomial("logit"), data = kids_with_permanency);
-      #print(summary(kids.logr));
       probability_column_name <- paste(poss_perm_outcomes[i], "_probs", sep = "");
       kids_with_permanency[[probability_column_name]] <- predict(kids.logr, type = "response");
   }
@@ -124,20 +127,24 @@ classify <- function(kids_with_permanency, poss_perm_outcomes, poss_perm_outcome
   #For each row, identify the probability column that has highest value, 
   #and store its name in a different column
   probability_column_names <- paste(poss_perm_outcomes, "_probs", sep = "");
-  kids_with_permanency$max_likely_outcome_col_index <- max.col(kids_with_permanency[, probability_column_names]);
-  kids_with_permanency$predicted_perm_outcome <- poss_perm_outcomes_as_in_DB[kids_with_permanency$max_likely_outcome_col_index];
-  #print(kids_with_permanency[1:20, ]);
+  kids_with_permanency$max_likely_outcome_col_index <- 
+     max.col(kids_with_permanency[, probability_column_names]);
+  kids_with_permanency$predicted_perm_outcome <- 
+    poss_perm_outcomes[kids_with_permanency$max_likely_outcome_col_index];
+
+  #Bring back the original permanency outcomes.
+  kids_with_permanency$processed_permanency_outcome <- original_permanency_outcomes;
 
   #Create the matrix of micro-average precision and recall
   precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 1, n_poss_perm_outcomes + 1);
-  rownames(precision_recall_matrix) <- append(poss_perm_outcomes_as_in_DB, "Micro-avg precision");
-  colnames(precision_recall_matrix) <- append(poss_perm_outcomes_as_in_DB, "Micro-avg recall");
+  rownames(precision_recall_matrix) <- append(poss_perm_outcomes, "Micro-avg precision");
+  colnames(precision_recall_matrix) <- append(poss_perm_outcomes, "Micro-avg recall");
   for (i in 1:n_poss_perm_outcomes)
   {
-    actual_outcome <- poss_perm_outcomes_as_in_DB[i];
+    actual_outcome <- poss_perm_outcomes[i];
     for (j in 1:n_poss_perm_outcomes)
     {
-      predicted_outcome <- poss_perm_outcomes_as_in_DB[j];
+      predicted_outcome <- poss_perm_outcomes[j];
       precision_recall_matrix[actual_outcome, predicted_outcome] <- 
         sum(((kids_with_permanency[, "processed_permanency_outcome"] == actual_outcome)
             & (kids_with_permanency[, "predicted_perm_outcome"] == predicted_outcome)));
@@ -170,6 +177,14 @@ classify <- function(kids_with_permanency, poss_perm_outcomes, poss_perm_outcome
     }
   }
   print(precision_recall_matrix);
+  plot(x = precision_recall_matrix["Micro-avg precision",], 
+       y = precision_recall_matrix[, "Micro-avg recall"], 
+       xlab = "Micro-avg precision", ylab = "Micro-avg recall",
+       xlim = c(0, .40), ylim = c(0, .70));
+  library(calibrate);
+  textxy(precision_recall_matrix["Micro-avg precision",], 
+         precision_recall_matrix[, "Micro-avg recall"], 
+         poss_perm_outcomes);
 }
 
 oversample_undersample <- function(kids_with_permanency)
@@ -177,17 +192,33 @@ oversample_undersample <- function(kids_with_permanency)
   count_by_perm_outcome <- aggregate(x = kids_with_permanency$child_id_episode_number, 
                         by = list(kids_with_permanency$processed_permanency_outcome), FUN = "length");
   colnames(count_by_perm_outcome) <- c("processed_permanency_outcome", "frequency");
-  count_by_perm_outcome <- subset(count_by_perm_outcome, (count_by_perm_outcome$frequency >= 100));
+
+  frequency_threshold <- 100;
+  insignificant_categories <- 
+    (subset(count_by_perm_outcome, (count_by_perm_outcome$frequency < frequency_threshold)))[,1];
+
+  cat("insignificant_categories\n");
+  print(insignificant_categories);
+
+  #Drop the coded columns corresponding to the insignificant categories.
+  kids_with_permanency <- kids_with_permanency[, 
+                          !(colnames(kids_with_permanency) %in% insignificant_categories)];
+
+  count_by_perm_outcome <- subset(count_by_perm_outcome, (count_by_perm_outcome$frequency >= frequency_threshold));
   expected_frequency_each_group <- round(0.8*min(count_by_perm_outcome$frequency));
   cat(paste("expected_frequency_each_group = ", expected_frequency_each_group, "\n", sep = ""));
   significant_outcomes <- unique(count_by_perm_outcome$processed_permanency_outcome);
+
+  #Changing poss_perm_outcomes globally so that the insignificant categories are not 
+  #considered in subsequent computations.
+
+  poss_perm_outcomes <<- significant_outcomes;
   count_by_perm_outcome$sampling_probability <- expected_frequency_each_group/(count_by_perm_outcome$frequency);
   
   #Converting the frequency table to a hashtable so that we can look up the sampling probabilities 
   #by categories.
 
   row.names(count_by_perm_outcome) <- count_by_perm_outcome$processed_permanency_outcome;
-  print(count_by_perm_outcome);
   kids_with_permanency$random_number <- runif(nrow(kids_with_permanency), 0, 1);
   kids_with_permanency$sampled <- 
     (kids_with_permanency$random_number <= 
@@ -200,4 +231,3 @@ oversample_undersample <- function(kids_with_permanency)
   print(count_by_perm_outcome_sampled_data);
   return(kids_with_permanency);
 }
-
