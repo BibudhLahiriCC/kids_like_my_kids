@@ -83,13 +83,15 @@ classify_for_exit <- function()
     kids_with_permanency[, poss_perm_outcomes[i]] <- 
       as.numeric(kids_with_permanency$processed_permanency_outcome == poss_perm_outcomes[i]);
   }
-
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
+  #cross_validate(kids_with_permanency, 10);
   classify(kids_with_permanency, poss_perm_outcomes);
   #pies_by_dimensions(kids_with_permanency);
   dbDisconnect(con);
 }
 
+#Inputs: Takes a dataset, builds the model
+#based on the dataset, returns the model.
 
 classify <- function(kids_with_permanency, poss_perm_outcomes)
 {
@@ -121,7 +123,7 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
                                       "factor(asian) +",
                                       "factor(parent_drug_abuse)", sep = "");
       this_formula <- as.formula(formula_string);
-            kids.logr <- glm(this_formula, 
+      kids.logr <- glm(this_formula, 
                        family = binomial("logit"), data = kids_with_permanency);
       probability_column_name <- paste(poss_perm_outcomes[i], "_probs", sep = "");
       kids_with_permanency[[probability_column_name]] <- predict(kids.logr, type = "response");
@@ -138,8 +140,23 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
 
   #Bring back the original permanency outcomes.
   kids_with_permanency$processed_permanency_outcome <- original_permanency_outcomes;
+  precision_recall_matrix <- 
+    compute_precision_recall(kids_with_permanency, poss_perm_outcomes, n_poss_perm_outcomes);
 
-  #Create the matrix of micro-average precision and recall
+  overall_classification_accuracy <- (sum(kids_with_permanency$processed_permanency_outcome 
+                                         == kids_with_permanency$predicted_perm_outcome))/
+                                          nrow(kids_with_permanency);
+  cat(paste("overall_classification_accuracy = ", overall_classification_accuracy, 
+            "\n", sep = ""));
+  plot_precision_recall(precision_recall_matrix, poss_perm_outcomes);
+  return(kids.logr);
+}
+
+
+
+compute_precision_recall <- function(kids_with_permanency, poss_perm_outcomes, n_poss_perm_outcomes)
+{
+   #Create the matrix of micro-average precision and recall
   precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 2, n_poss_perm_outcomes + 2);
   rownames(precision_recall_matrix) <- append(poss_perm_outcomes, 
                                         c("Micro-avg precision", "Total predicted"));
@@ -184,14 +201,12 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
     }
     precision_recall_matrix[i, "Total actual"] <- rowsum;
   }
-
   print(precision_recall_matrix);
-  overall_classification_accuracy <- (sum(kids_with_permanency$processed_permanency_outcome 
-                                         == kids_with_permanency$predicted_perm_outcome))/
-                                          nrow(kids_with_permanency);
-  cat(paste("overall_classification_accuracy = ", overall_classification_accuracy, 
-            "\n", sep = ""));
+  return(precision_recall_matrix);
+}
 
+plot_precision_recall <- function(precision_recall_matrix, poss_perm_outcomes)
+{
   filename <- paste("./outcome_classification/precision_recall.png", sep = "");
   png(filename,  width = 920, height = 960, units = "px");
 
@@ -205,6 +220,7 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
          poss_perm_outcomes, cx = 1.0);
   dev.off();
 }
+
 
 oversample_undersample <- function(kids_with_permanency)
 {
@@ -305,3 +321,28 @@ oversample_undersample <- function(kids_with_permanency)
   }
 
 
+  #Select the model that creates the lowest error on the validation set,
+  #by k-fold cross-validation.
+
+  cross_validate <- function(kids_with_permanency, k)
+  {
+   fraction_of_training_data <- 0.8;
+   kids_with_permanency$training_or_testing <- runif(nrow(kids_with_permanency));
+   training_data <- subset(kids_with_permanency, (kids_with_permanency$training_or_testing <= fraction_of_training_data));
+   test_data <- subset(kids_with_permanency, (kids_with_permanency$training_or_testing > fraction_of_training_data));
+
+   cat(paste("nrow(training_data) = ", nrow(training_data),
+             ", nrow(test_data) = ", nrow(test_data), "\n", sep = ""));
+   training_data$fold_id <- round(runif(nrow(training_data), 1, k));
+
+   for (i in 1:k)
+   {
+     training_set_this_fold <- subset(training_data, (fold_id != i));
+     validation_set_this_fold <- subset(training_data, (fold_id == i));
+     cat(paste("k = ", k, ", i = ", i, 
+               ", size of training_set_this_fold = ", nrow(training_set_this_fold), 
+               ", size of validation_set_this_fold = ", nrow(validation_set_this_fold), "\n", sep = ""));
+     classify()
+     
+    }
+  }
