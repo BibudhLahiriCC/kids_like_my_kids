@@ -86,8 +86,8 @@ classify_for_exit <- function()
 
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
   classify(kids_with_permanency, poss_perm_outcomes);
+  #pies_by_dimensions(kids_with_permanency);
   dbDisconnect(con);
-  #return(count_by_perm_outcome);
 }
 
 
@@ -116,7 +116,10 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
                                       "factor(age_category_4) + ",
                                       "count_previous_removal_episodes + factor(black) ",
                                       "+ factor(child_disability) + ",
-                                      "factor(parent_alcohol_abuse)", sep = "");
+                                      "factor(parent_alcohol_abuse) + ",
+                                      "factor(american_indian) + ",
+                                      "factor(asian) +",
+                                      "factor(parent_drug_abuse)", sep = "");
       this_formula <- as.formula(formula_string);
             kids.logr <- glm(this_formula, 
                        family = binomial("logit"), data = kids_with_permanency);
@@ -131,14 +134,17 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
      max.col(kids_with_permanency[, probability_column_names]);
   kids_with_permanency$predicted_perm_outcome <- 
     poss_perm_outcomes[kids_with_permanency$max_likely_outcome_col_index];
+  
 
   #Bring back the original permanency outcomes.
   kids_with_permanency$processed_permanency_outcome <- original_permanency_outcomes;
 
   #Create the matrix of micro-average precision and recall
-  precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 1, n_poss_perm_outcomes + 1);
-  rownames(precision_recall_matrix) <- append(poss_perm_outcomes, "Micro-avg precision");
-  colnames(precision_recall_matrix) <- append(poss_perm_outcomes, "Micro-avg recall");
+  precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 2, n_poss_perm_outcomes + 2);
+  rownames(precision_recall_matrix) <- append(poss_perm_outcomes, 
+                                        c("Micro-avg precision", "Total predicted"));
+  colnames(precision_recall_matrix) <- append(poss_perm_outcomes, 
+                                        c("Micro-avg recall", "Total actual"));
   for (i in 1:n_poss_perm_outcomes)
   {
     actual_outcome <- poss_perm_outcomes[i];
@@ -162,6 +168,7 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
     {
       precision_recall_matrix["Micro-avg precision", j] <- 0;
     }
+    precision_recall_matrix["Total predicted", j] <- colsum;
   }
   for (i in 1:n_poss_perm_outcomes)
   {
@@ -175,8 +182,19 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
     {
       precision_recall_matrix[i, "Micro-avg recall"] <- 0;
     }
+    precision_recall_matrix[i, "Total actual"] <- rowsum;
   }
+
   print(precision_recall_matrix);
+  overall_classification_accuracy <- (sum(kids_with_permanency$processed_permanency_outcome 
+                                         == kids_with_permanency$predicted_perm_outcome))/
+                                          nrow(kids_with_permanency);
+  cat(paste("overall_classification_accuracy = ", overall_classification_accuracy, 
+            "\n", sep = ""));
+
+  filename <- paste("./outcome_classification/precision_recall.png", sep = "");
+  png(filename,  width = 920, height = 960, units = "px");
+
   plot(x = precision_recall_matrix["Micro-avg precision",], 
        y = precision_recall_matrix[, "Micro-avg recall"], 
        xlab = "Micro-avg precision", ylab = "Micro-avg recall",
@@ -184,7 +202,8 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
   library(calibrate);
   textxy(precision_recall_matrix["Micro-avg precision",], 
          precision_recall_matrix[, "Micro-avg recall"], 
-         poss_perm_outcomes);
+         poss_perm_outcomes, cx = 1.0);
+  dev.off();
 }
 
 oversample_undersample <- function(kids_with_permanency)
@@ -205,7 +224,10 @@ oversample_undersample <- function(kids_with_permanency)
                           !(colnames(kids_with_permanency) %in% insignificant_categories)];
 
   count_by_perm_outcome <- subset(count_by_perm_outcome, (count_by_perm_outcome$frequency >= frequency_threshold));
-  expected_frequency_each_group <- round(0.8*min(count_by_perm_outcome$frequency));
+  
+  #expected_frequency_each_group <- round(0.8*min(count_by_perm_outcome$frequency));
+  expected_frequency_each_group <- round(min(count_by_perm_outcome$frequency));
+  
   cat(paste("expected_frequency_each_group = ", expected_frequency_each_group, "\n", sep = ""));
   significant_outcomes <- unique(count_by_perm_outcome$processed_permanency_outcome);
 
@@ -231,3 +253,55 @@ oversample_undersample <- function(kids_with_permanency)
   print(count_by_perm_outcome_sampled_data);
   return(kids_with_permanency);
 }
+
+  #Histograms to check what dimensions are important
+  pies_by_dimensions <- function(kid_metrics)
+  {
+      columns_to_remove <- c("random_number", "sampled","age_category_1",
+                             "age_category_2","age_category_3","age_category_4", "n_placements",
+                             "length_of_stay");
+      columns_to_remove <- append(columns_to_remove, poss_perm_outcomes)
+      kid_metrics <- kid_metrics[, !(colnames(kid_metrics) %in% columns_to_remove)];
+      covariates <- colnames(kid_metrics);
+      index <- which(covariates == "processed_permanency_outcome");
+      covariates <- covariates[-index];
+      index <- which(covariates == "child_id_episode_number");
+      covariates <- covariates[-index];
+
+
+        n_covariates <- length(covariates);
+        for (i in 1:n_covariates)
+        {
+            cat(paste("covariate = ", covariates[i], "\n", sep = ""));
+            filename <- paste("./pies_by_dimensions/", covariates[i],".png", sep = "");
+            png(filename,  width = 920, height = 960, units = "px");
+            distinct_values <- unique(kid_metrics[, covariates[i]]);
+            distinct_values <- distinct_values[!is.na(distinct_values)];
+            distinct_values <- sort(distinct_values);
+
+            n_distinct_values <- min(5, length(distinct_values));
+            cat(paste("n_distinct_values = ", n_distinct_values, "\n", sep = ""));
+            if (n_distinct_values > 0)
+            {
+              par(mfrow=c(ceiling(n_distinct_values/2), 2));
+              for (j in 1:n_distinct_values)
+              {
+                cat(paste("covariate = ", covariates[i], ", value = ", distinct_values[j], "\n", sep = ""));
+                kid_metrics_this_value <- subset(kid_metrics, (kid_metrics[, covariates[i]] == distinct_values[j]));
+                count_by_perm_outcome <- aggregate(x = kid_metrics_this_value$child_id_episode_number, 
+                        by = list(kid_metrics_this_value$processed_permanency_outcome), FUN = "length");
+                count_by_perm_outcome$percentages <- 
+                  round(count_by_perm_outcome[,2]/sum(count_by_perm_outcome[,2]), 2);
+                print(count_by_perm_outcome);
+                v_labels <-  paste(count_by_perm_outcome[,1], count_by_perm_outcome[,3]);
+                pie(x = count_by_perm_outcome[,2], labels = v_labels,
+                    main = paste(nrow(kid_metrics_this_value), " kids with ",
+                                  covariates[i], " = ", distinct_values[j], sep = ""), cex.lab = 1.5,
+                                  cex.main = 1.5);
+              }
+            }
+            dev.off();
+      }
+  }
+
+
