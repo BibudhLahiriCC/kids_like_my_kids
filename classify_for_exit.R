@@ -84,33 +84,25 @@ classify_for_exit <- function()
       as.numeric(kids_with_permanency$processed_permanency_outcome == poss_perm_outcomes[i]);
   }
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
-  #cross_validate(kids_with_permanency, 10);
-  classify(kids_with_permanency, poss_perm_outcomes);
+  cross_validate(kids_with_permanency, 5);
+  #classify(kids_with_permanency, poss_perm_outcomes);
   #pies_by_dimensions(kids_with_permanency);
   dbDisconnect(con);
 }
 
 #Inputs: Takes a dataset, builds the model
-#based on the dataset, returns the model.
+#based on the dataset, returns the model. This is to be called from 
+#within 
 
-classify <- function(kids_with_permanency, poss_perm_outcomes)
+classify <- function(kids_with_permanency, poss_perm_outcomes, original_permanency_outcomes,
+                     validation_set_start_index, 
+                     validation_set_end_index,
+                     test_set_start_index, 
+                     test_set_end_index)
 {
-  #Keep the numeric (includes coded categorical) covariates only and scale them.
-  covariates <- colnames(kids_with_permanency);
-  columns_to_remove <- c("age_category", "child_id_episode_number", "processed_permanency_outcome", 
-                         "random_number", "sampled");
-  #Store the permanency outcomes in a vector, before removing the column from the data frame, 
-  #so that we can use them later while computing precision and recall
-
-  original_permanency_outcomes <- kids_with_permanency$processed_permanency_outcome;
-
-  kids_with_permanency <- kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
-  kids_with_permanency <- as.data.frame(scale(kids_with_permanency));
-  
   n_poss_perm_outcomes <- length(poss_perm_outcomes);
   for (i in 1:n_poss_perm_outcomes)
   {
-      cat(paste("i = ", i, ", poss_perm_outcomes[i] = ", poss_perm_outcomes[i], "\n", sep = ""));
       formula_string <- paste("factor(", poss_perm_outcomes[i],
                                         ") ~ n_plcmnts_in_initial_months + ",
                                         "factor(age_category_1) + ",
@@ -139,16 +131,23 @@ classify <- function(kids_with_permanency, poss_perm_outcomes)
   
 
   #Bring back the original permanency outcomes.
-  kids_with_permanency$processed_permanency_outcome <- original_permanency_outcomes;
-  precision_recall_matrix <- 
-    compute_precision_recall(kids_with_permanency, poss_perm_outcomes, n_poss_perm_outcomes);
+  rows_to_remove <- c(validation_set_start_index:validation_set_end_index);
+  rows_to_remove <- append(rows_to_remove, c(test_set_start_index:test_set_end_index));
+
+  original_permanency_outcomes_training_this_fold <- 
+      original_permanency_outcomes[-rows_to_remove];
+  kids_with_permanency$processed_permanency_outcome <- 
+       original_permanency_outcomes_training_this_fold;
+    
+  #precision_recall_matrix <- 
+  #  compute_precision_recall(kids_with_permanency, poss_perm_outcomes, n_poss_perm_outcomes);
 
   overall_classification_accuracy <- (sum(kids_with_permanency$processed_permanency_outcome 
                                          == kids_with_permanency$predicted_perm_outcome))/
                                           nrow(kids_with_permanency);
-  cat(paste("overall_classification_accuracy = ", overall_classification_accuracy, 
+  cat(paste("overall_classification_accuracy on training set = ", overall_classification_accuracy, 
             "\n", sep = ""));
-  plot_precision_recall(precision_recall_matrix, poss_perm_outcomes);
+  #plot_precision_recall(precision_recall_matrix, poss_perm_outcomes);
   return(kids.logr);
 }
 
@@ -288,7 +287,6 @@ oversample_undersample <- function(kids_with_permanency)
         n_covariates <- length(covariates);
         for (i in 1:n_covariates)
         {
-            cat(paste("covariate = ", covariates[i], "\n", sep = ""));
             filename <- paste("./pies_by_dimensions/", covariates[i],".png", sep = "");
             png(filename,  width = 920, height = 960, units = "px");
             distinct_values <- unique(kid_metrics[, covariates[i]]);
@@ -296,13 +294,11 @@ oversample_undersample <- function(kids_with_permanency)
             distinct_values <- sort(distinct_values);
 
             n_distinct_values <- min(5, length(distinct_values));
-            cat(paste("n_distinct_values = ", n_distinct_values, "\n", sep = ""));
             if (n_distinct_values > 0)
             {
               par(mfrow=c(ceiling(n_distinct_values/2), 2));
               for (j in 1:n_distinct_values)
               {
-                cat(paste("covariate = ", covariates[i], ", value = ", distinct_values[j], "\n", sep = ""));
                 kid_metrics_this_value <- subset(kid_metrics, (kid_metrics[, covariates[i]] == distinct_values[j]));
                 count_by_perm_outcome <- aggregate(x = kid_metrics_this_value$child_id_episode_number, 
                         by = list(kid_metrics_this_value$processed_permanency_outcome), FUN = "length");
@@ -316,33 +312,108 @@ oversample_undersample <- function(kids_with_permanency)
                                   cex.main = 1.5);
               }
             }
-            dev.off();
+        dev.off();
       }
   }
 
+
+  scale_dataset <- function(kids_with_permanency)
+  {
+     #To apply the model on the dataset, keep the numeric 
+     #(includes coded categorical) covariates only and scale them.
+
+      covariates <- colnames(kids_with_permanency);
+      columns_to_remove <- c("age_category", "child_id_episode_number", "processed_permanency_outcome", 
+                             "random_number", "sampled");
+      #Store the permanency outcomes in a vector, before removing the column from the data frame, 
+      #so that we can use them later while computing precision and recall
+
+      kids_with_permanency <- 
+         kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
+      kids_with_permanency <- as.data.frame(scale(kids_with_permanency));
+      return(kids_with_permanency);
+  }
 
   #Select the model that creates the lowest error on the validation set,
   #by k-fold cross-validation.
 
   cross_validate <- function(kids_with_permanency, k)
   {
-   fraction_of_training_data <- 0.8;
-   kids_with_permanency$training_or_testing <- runif(nrow(kids_with_permanency));
-   training_data <- subset(kids_with_permanency, (kids_with_permanency$training_or_testing <= fraction_of_training_data));
-   test_data <- subset(kids_with_permanency, (kids_with_permanency$training_or_testing > fraction_of_training_data));
+   #Scaling is done only once, and that takes care of all of training, validation and test data
 
-   cat(paste("nrow(training_data) = ", nrow(training_data),
-             ", nrow(test_data) = ", nrow(test_data), "\n", sep = ""));
-   training_data$fold_id <- round(runif(nrow(training_data), 1, k));
+   original_permanency_outcomes <- kids_with_permanency$processed_permanency_outcome;
+   kids_with_permanency <- scale_dataset(kids_with_permanency);
+   #print(kids_with_permanency);
+
+   fraction_of_training_data <- 0.8;
+
+   #Training dataset is 1..training_data_size in the original dataset
+
+   training_data_size <- round(fraction_of_training_data*nrow(kids_with_permanency));
+
+   #c[i] is the end-index of the i-th chunk for k-fold cross-validation
+
+   size_of_each_chunk <- ceiling(training_data_size/k);
+   markers_in_training_data <- mat.or.vec(k, 2);
 
    for (i in 1:k)
    {
-     training_set_this_fold <- subset(training_data, (fold_id != i));
-     validation_set_this_fold <- subset(training_data, (fold_id == i));
+     markers_in_training_data[i, 1] <- 
+       (i-1)*size_of_each_chunk + 1;
+     markers_in_training_data[i, 2] <- 
+       min(i*size_of_each_chunk, training_data_size);
+   }
+
+   training_data <- kids_with_permanency[1:training_data_size,];
+   test_data <- kids_with_permanency[(training_data_size+1):nrow(kids_with_permanency),];
+
+   cat(paste("nrow(training_data) = ", nrow(training_data),
+             ", nrow(test_data) = ", nrow(test_data), "\n", sep = ""));
+
+   for (i in 1:k)
+   {
+     #The i-th chunk is the validation set, rest all training set.
+
+     validation_set_this_fold <- training_data[markers_in_training_data[i,1]:
+                                               markers_in_training_data[i,2], ];
+     training_set_this_fold <- training_data[-(markers_in_training_data[i,1]:
+                                               markers_in_training_data[i,2]), ];
      cat(paste("k = ", k, ", i = ", i, 
                ", size of training_set_this_fold = ", nrow(training_set_this_fold), 
                ", size of validation_set_this_fold = ", nrow(validation_set_this_fold), "\n", sep = ""));
-     classify()
-     
-    }
+
+      kids.logr <- classify(training_set_this_fold, poss_perm_outcomes, original_permanency_outcomes,
+                            markers_in_training_data[i,1], markers_in_training_data[i,2],
+                            (training_data_size+1), 
+                            nrow(kids_with_permanency));
+
+      n_poss_perm_outcomes <- length(poss_perm_outcomes);
+
+      for (j in 1:n_poss_perm_outcomes)
+      {
+        probability_column_name <- paste(poss_perm_outcomes[j], "_probs", sep = "");
+        validation_set_this_fold[[probability_column_name]] <- predict(kids.logr, newdata = validation_set_this_fold
+                                                                       , type = "response");
+      }
+      #On the validation set, for each row, identify the probability column that has highest value, 
+      #and store its name in a different column
+
+      probability_column_names <- paste(poss_perm_outcomes, "_probs", sep = "");
+      validation_set_this_fold$max_likely_outcome_col_index <- 
+         max.col(validation_set_this_fold[, probability_column_names]);
+      validation_set_this_fold$predicted_perm_outcome <- 
+        poss_perm_outcomes[validation_set_this_fold$max_likely_outcome_col_index];
+
+      #Bring back the original permanency outcomes on validation dataset, by picking up
+      #the appropriate range.
+
+      validation_set_this_fold$processed_permanency_outcome <- 
+        original_permanency_outcomes[markers_in_training_data[i,1]:
+                                     markers_in_training_data[i,2]];
+      classification_accuracy_this_fold <- (sum(validation_set_this_fold$processed_permanency_outcome 
+                                         == validation_set_this_fold$predicted_perm_outcome))/
+                                          nrow(validation_set_this_fold);
+      cat(paste("Over validation set, classification_accuracy_this_fold = ", classification_accuracy_this_fold, 
+            "\n", sep = ""));
+      }
   }
