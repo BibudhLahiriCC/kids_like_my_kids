@@ -1,6 +1,6 @@
 poss_perm_outcomes <<- NA;
 
-classify_for_exit <- function()
+classify_for_exit_SVM <- function()
 {
   library(RPostgreSQL);
   con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
@@ -76,18 +76,42 @@ classify_for_exit <- function()
   kids_with_permanency$age_category_3 <- as.numeric(kids_with_permanency$age_category == 4);
   kids_with_permanency$age_category_4 <- as.numeric(kids_with_permanency$age_category == 5);
  
-  poss_perm_outcomes <<- unique(kids_with_permanency$processed_permanency_outcome);
-  n_poss_perm_outcomes <- length(poss_perm_outcomes);
-  for (i in 1:n_poss_perm_outcomes)
-  {
-    kids_with_permanency[, poss_perm_outcomes[i]] <- 
-      as.numeric(kids_with_permanency$processed_permanency_outcome == poss_perm_outcomes[i]);
-  }
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
-  cross_validate(kids_with_permanency, 5);
+  #cross_validate(kids_with_permanency, 5);
   #classify(kids_with_permanency, poss_perm_outcomes);
   #pies_by_dimensions(kids_with_permanency);
+
+  classify_simple(kids_with_permanency);
   dbDisconnect(con);
+}
+
+
+classify_simple <- function(kids_with_permanency)
+{
+  library(e1071);
+
+  #kids_with_permanency$random_number <- runif(nrow(kids_with_permanency), 0, 1);
+  #kids_with_permanency <- subset(kids_with_permanency, (kids_with_permanency$random_number <= 0.1));
+  #cat(paste("size of uniform random sample = ", nrow(kids_with_permanency), "\n", sep = ""));
+  
+  y <- kids_with_permanency$processed_permanency_outcome;
+  columns_to_remove <- c("age_category", "child_id_episode_number", "processed_permanency_outcome"
+                        ,"random_number", "sampled"
+                         );
+
+  kids_with_permanency <- 
+     kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
+
+  model <- svm(kids_with_permanency, y, type = "C-classification");
+  print(model);
+
+  # test with train data
+  kids_with_permanency$predicted_perm_outcome <- predict(model, kids_with_permanency);
+  kids_with_permanency$processed_permanency_outcome <- y;
+
+  poss_perm_outcomes <- unique(kids_with_permanency$processed_permanency_outcome);
+  n_poss_perm_outcomes <- length(poss_perm_outcomes);
+  compute_precision_recall(kids_with_permanency, poss_perm_outcomes, n_poss_perm_outcomes);
 }
 
 #Inputs: Takes a dataset, builds the model
@@ -226,6 +250,7 @@ oversample_undersample <- function(kids_with_permanency)
   count_by_perm_outcome <- aggregate(x = kids_with_permanency$child_id_episode_number, 
                         by = list(kids_with_permanency$processed_permanency_outcome), FUN = "length");
   colnames(count_by_perm_outcome) <- c("processed_permanency_outcome", "frequency");
+  print(count_by_perm_outcome);
 
   frequency_threshold <- 100;
   insignificant_categories <- 
