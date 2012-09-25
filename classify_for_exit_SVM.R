@@ -77,14 +77,15 @@ classify_for_exit_SVM <- function()
   kids_with_permanency$age_category_4 <- as.numeric(kids_with_permanency$age_category == 5);
  
   kids_with_permanency <- oversample_undersample(kids_with_permanency);
-  #best_model <- cross_validate(kids_with_permanency, 5);
+  best_model <- cross_validate(kids_with_permanency, 5);
   #classify(kids_with_permanency, poss_perm_outcomes);
   #pies_by_dimensions(kids_with_permanency);
 
   #model <- classify_simple(kids_with_permanency);
-  grid_search(kids_with_permanency, 5);
+  #grid_search_for_gaussian(kids_with_permanency, 5);
+  #grid_search_for_linear(kids_with_permanency, 5);
   dbDisconnect(con);
-  #return(best_model);
+  return(best_model);
 }
 
 
@@ -132,7 +133,10 @@ classify <- function(kids_with_permanency, poss_perm_outcomes, original_permanen
 
   kids_with_permanency <- 
    kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
-  model <- svm(kids_with_permanency, y, type = "C-classification");
+  model <- svm(kids_with_permanency, y, type = "C-classification",
+               #cost = 16, gamma = 0.0078125);
+               #cost = 512, gamma = 0.0009765625);
+               kernel = "linear", cost = 8);
   
   #Bring back the original permanency outcomes.
   kids_with_permanency$predicted_perm_outcome <- predict(model, kids_with_permanency);
@@ -163,9 +167,9 @@ compute_precision_recall <- function(kids_with_permanency, poss_perm_outcomes, n
    #Create the matrix of micro-average precision and recall
   precision_recall_matrix <- mat.or.vec(n_poss_perm_outcomes + 2, n_poss_perm_outcomes + 2);
   rownames(precision_recall_matrix) <- append(poss_perm_outcomes, 
-                                        c("Micro-avg precision", "Total predicted"));
+                                        c("Micro-avg-precision", "Total_predicted"));
   colnames(precision_recall_matrix) <- append(poss_perm_outcomes, 
-                                        c("Micro-avg recall", "Total actual"));
+                                        c("Micro-avg-recall", "Total_actual"));
   for (i in 1:n_poss_perm_outcomes)
   {
     actual_outcome <- poss_perm_outcomes[i];
@@ -182,28 +186,28 @@ compute_precision_recall <- function(kids_with_permanency, poss_perm_outcomes, n
     colsum <- sum(precision_recall_matrix[, j]);
     if (colsum > 0) 
     {
-      precision_recall_matrix["Micro-avg precision", j] <- 
+      precision_recall_matrix["Micro-avg-precision", j] <- 
         round(precision_recall_matrix[j, j]/colsum, 2);
     }
     else
     {
-      precision_recall_matrix["Micro-avg precision", j] <- 0;
+      precision_recall_matrix["Micro-avg-precision", j] <- 0;
     }
-    precision_recall_matrix["Total predicted", j] <- colsum;
+    precision_recall_matrix["Total_predicted", j] <- colsum;
   }
   for (i in 1:n_poss_perm_outcomes)
   {
     rowsum <- sum(precision_recall_matrix[i, ]);
     if (rowsum > 0) 
     {
-      precision_recall_matrix[i, "Micro-avg recall"] <- 
+      precision_recall_matrix[i, "Micro-avg-recall"] <- 
         round(precision_recall_matrix[i, i]/rowsum, 2);  
     }
     else
     {
-      precision_recall_matrix[i, "Micro-avg recall"] <- 0;
+      precision_recall_matrix[i, "Micro-avg-recall"] <- 0;
     }
-    precision_recall_matrix[i, "Total actual"] <- rowsum;
+    precision_recall_matrix[i, "Total_actual"] <- rowsum;
   }
   print(precision_recall_matrix);
   return(precision_recall_matrix);
@@ -361,7 +365,6 @@ oversample_undersample <- function(kids_with_permanency)
          test_data[, !(colnames(test_data) %in% columns_to_remove)];
       test_data$predicted_perm_outcome <- predict(best_model, test_data);
       test_data$processed_permanency_outcome <- original_permanency_outcomes[(training_data_size + 1):nrow(kids_with_permanency)];
-      print(test_data[1:10, ]);
       classification_accuracy_test_data <- (sum(test_data$processed_permanency_outcome 
                                                 == test_data$predicted_perm_outcome))/
                                             nrow(test_data);
@@ -376,7 +379,7 @@ oversample_undersample <- function(kids_with_permanency)
 #The results get added there during cross-validaiton, based on the validation subset 
 #in each fold.
 
-grid_search <- function(kids_with_permanency, k)
+grid_search_for_gaussian <- function(kids_with_permanency, k)
 {
   library(e1071);
   fraction_of_training_data <- 0.8;
@@ -397,25 +400,24 @@ grid_search <- function(kids_with_permanency, k)
   n_C_values <- length(C_values);
   n_gamma_values <- length(gamma_values);
 
+  best_cross_validation_accuracy <- 0;
+  best_C <- 0;
+  best_gamma <- 0;
+
   columns_to_remove <- c("age_category", "child_id_episode_number", 
                                    "processed_permanency_outcome"
                                   ,"random_number", "sampled"
                                    );
+  accuracy_summary <-  data.frame(mat.or.vec(k, 2));
+  colnames(accuracy_summary) <- c("validation_set_this_fold_size", "correct_classifications");
 
   #We will keep the combination of C and gamma that gives the best cross-validation accuracy
   #on the training dataset.
-
-  
   for (i in 1:n_C_values)
   {
     for (j in 1:n_gamma_values)
     {
       training_data$fold_id <- round(runif(training_data_size, 1, k));
-      classification_results <- data.frame(mat.or.vec(training_data_size, 2));
-      colnames(classification_results) <- c("processed_permanency_outcome", 
-                                            "predicted_perm_outcome");
-      classification_results_start_point <- 1;
- 
        for (m in 1:k)
        {
            training_set_this_fold <- subset(training_data, (fold_id != m));
@@ -429,42 +431,104 @@ grid_search <- function(kids_with_permanency, k)
            #Apply the model based on training_set_this_fold on validation_set_this_fold.
            #Before doing that, store the actual classes of validation_set_this_fold.
            
-           l <- 1;
-           for (n in classification_results_start_point:
-                (classification_results_start_point + nrow(validation_set_this_fold)-1))
-           {
-            classification_results[n, "processed_permanency_outcome"] <- validation_set_this_fold[l, "processed_permanency_outcome"];
-            l <- l + 1;
-           }
-
+           validation_set_actual_outcomes <- validation_set_this_fold$processed_permanency_outcome;
            validation_set_this_fold <- 
               validation_set_this_fold[, !(colnames(validation_set_this_fold) %in% columns_to_remove)];
            validation_set_this_fold$predicted_perm_outcome <- predict(model, validation_set_this_fold);
-           cat("Actual validation_set_this_fold\n");
-           print(validation_set_this_fold[1:10, ]);
-           l <- 1;
-           for (n in classification_results_start_point:
-                (classification_results_start_point + nrow(validation_set_this_fold)-1))
-           {
-            classification_results[n, "predicted_perm_outcome"] <- validation_set_this_fold$predicted_perm_outcome[l];
-            cat(paste("validation_set_this_fold[l, predicted_perm_outcome] = ",
-                      validation_set_this_fold[l, "predicted_perm_outcome"], 
-                      ", classification_results[n, predicted_perm_outcome] = ",
-                      as.character(classification_results[n, "predicted_perm_outcome"]), 
-                      "\n", sep = ""));
-            l <- l + 1;
-           }
-           classification_results_start_point <- classification_results_start_point + 
-                                          nrow(validation_set_this_fold);
+           validation_set_this_fold$processed_permanency_outcome <- validation_set_actual_outcomes;
+
+           accuracy_summary[m, "validation_set_this_fold_size"] <- nrow(validation_set_this_fold);
+           accuracy_summary[m, "correct_classifications"] <- (sum(validation_set_this_fold$processed_permanency_outcome 
+                                                == validation_set_this_fold$predicted_perm_outcome))
       } #end for (m in 1:k)
-      print(classification_results[1:10, ]);
-      cross_validated_classification_accuracy <- (sum(classification_results$processed_permanency_outcome 
-                                                == classification_results$predicted_perm_outcome))/
-                                            nrow(classification_results);
-      cat(paste("average cross-validated accuracy with ", 
+        cross_validated_classification_accuracy <- sum(accuracy_summary$correct_classifications)/ 
+                                              sum(accuracy_summary$validation_set_this_fold_size);
+        cat(paste("average cross-validated accuracy with ", 
                 "C = ", C_values[i], ", gamma = ", gamma_values[j], " is ",  
                 round(cross_validated_classification_accuracy, 2), "\n", sep = ""));
+        if (cross_validated_classification_accuracy > best_cross_validation_accuracy)
+        {
+           best_cross_validation_accuracy <- cross_validated_classification_accuracy;
+           best_C <- C_values[i];
+           best_gamma <- gamma_values[j];
+        }
     }  #end for (j in 1:n_gamma_values)
   } #end for (i in 1:n_C_values)
+  cat(paste("best_C = ", best_C, ", best_gamma = ", best_gamma, "\n", sep = ""));
+}
+
+
+
+
+#We store the actual and predicted classes for each data point in a separate matrix.
+#The results get added there during cross-validaiton, based on the validation subset 
+#in each fold.
+
+grid_search_for_linear <- function(kids_with_permanency, k)
+{
+  library(e1071);
+  fraction_of_training_data <- 0.8;
+  #Training dataset is 1..training_data_size in the original dataset
+  training_data_size <- round(fraction_of_training_data*nrow(kids_with_permanency));
+  training_data <- kids_with_permanency[1:training_data_size,];
+  test_data <- kids_with_permanency[(training_data_size+1):nrow(kids_with_permanency),];
+  cat(paste("nrow(training_data) = ", nrow(training_data),
+             ", nrow(test_data) = ", nrow(test_data), "\n", sep = ""));
+  
+  #C is the regularization parameter in the optimization problem.
+  exponents <- seq(-5, 15, by = 1);
+  C_values <- 2^exponents;
+  n_C_values <- length(C_values);
+
+  best_cross_validation_accuracy <- 0;
+  best_C <- 0;
+
+  columns_to_remove <- c("age_category", "child_id_episode_number", 
+                                   "processed_permanency_outcome"
+                                  ,"random_number", "sampled"
+                                   );
+  accuracy_summary <-  data.frame(mat.or.vec(k, 2));
+  colnames(accuracy_summary) <- c("validation_set_this_fold_size", "correct_classifications");
+
+  #We will keep the combination of C and gamma that gives the best cross-validation accuracy
+  #on the training dataset.
+  for (i in 1:n_C_values)
+  {
+      training_data$fold_id <- round(runif(training_data_size, 1, k));
+       for (m in 1:k)
+       {
+           training_set_this_fold <- subset(training_data, (fold_id != m));
+           validation_set_this_fold <- subset(training_data, (fold_id == m));
+           y <- training_set_this_fold$processed_permanency_outcome;
+           training_set_this_fold <- 
+              training_set_this_fold[, !(colnames(training_set_this_fold) %in% columns_to_remove)];
+           model <- svm(training_set_this_fold, y, type = "C-classification",
+                        kernel = "linear", cost = C_values[i]);
+
+           #Apply the model based on training_set_this_fold on validation_set_this_fold.
+           #Before doing that, store the actual classes of validation_set_this_fold.
+           
+           validation_set_actual_outcomes <- validation_set_this_fold$processed_permanency_outcome;
+           validation_set_this_fold <- 
+              validation_set_this_fold[, !(colnames(validation_set_this_fold) %in% columns_to_remove)];
+           validation_set_this_fold$predicted_perm_outcome <- predict(model, validation_set_this_fold);
+           validation_set_this_fold$processed_permanency_outcome <- validation_set_actual_outcomes;
+
+           accuracy_summary[m, "validation_set_this_fold_size"] <- nrow(validation_set_this_fold);
+           accuracy_summary[m, "correct_classifications"] <- (sum(validation_set_this_fold$processed_permanency_outcome 
+                                                == validation_set_this_fold$predicted_perm_outcome))
+      } #end for (m in 1:k)
+        cross_validated_classification_accuracy <- sum(accuracy_summary$correct_classifications)/ 
+                                              sum(accuracy_summary$validation_set_this_fold_size);
+        cat(paste("average cross-validated accuracy with ", 
+                "C = ", C_values[i], " is ",  
+                round(cross_validated_classification_accuracy, 2), "\n", sep = ""));
+        if (cross_validated_classification_accuracy > best_cross_validation_accuracy)
+        {
+           best_cross_validation_accuracy <- cross_validated_classification_accuracy;
+           best_C <- C_values[i];
+        }
+  } #end for (i in 1:n_C_values)
+  cat(paste("best_C = ", best_C, "\n", sep = ""));
 }
 
