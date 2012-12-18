@@ -89,7 +89,8 @@ CREATE FUNCTION get_domestic_violence(bigint, bigint) returns void as $$
     from removal_episodes, allegations, assessments, intakes
     where removal_episodes.child_id = allegations.victim_id
     and allegations.assessment_id = assessments.id
-    and assessments.intake_id = intakes.id;
+    and assessments.intake_id = intakes.id
+    and removal_episodes.child_id = v_child_id;
     
     update klmk_metrics
     set domestic_violence_reported = v_domestic_violence
@@ -220,44 +221,66 @@ CREATE FUNCTION metrics_for_kids_like_my_kids() RETURNS void AS $$
            when p.gender = 'Female' then 0
            else null
            end as gender,
-      (re.end_date - re.start_date) length_of_stay, 
-      categorize_age(cast(extract(year from age(re.start_date, p.date_of_birth)) as integer)) 
-                as age_category
+      (re.end_date - re.start_date) length_of_stay 
       from removal_episodes re, people p
       where re.child_id = p.id
       order by re.child_id, re.episode_number;
       
     begin
+
       for kid_with_rem_ep in curKidsWithRemEps loop
      
-        insert into klmk_metrics (child_id, episode_number,age_category,gender) 
-        values (kid_with_rem_ep.child_id, kid_with_rem_ep.episode_number,kid_with_rem_ep.age_category,kid_with_rem_ep.gender);
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before insert, current time = %', current_t;*/
+
+        insert into klmk_metrics (child_id, episode_number, gender) 
+        values (kid_with_rem_ep.child_id, kid_with_rem_ep.episode_number, kid_with_rem_ep.gender);
+
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before querying removal_episodes, current time = %', current_t;*/
 
         select count(*) into n_previous_removal_episodes
         from removal_episodes re_prev 
         where re_prev.child_id = kid_with_rem_ep.child_id
         and re_prev.episode_number < kid_with_rem_ep.episode_number;
 
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before calling get_first_rem_loc_within_rem_ep, current time = %', current_t;*/
+
         v_first_rem_loc_id := get_first_rem_loc_within_rem_ep(kid_with_rem_ep.child_id, kid_with_rem_ep.start_date); 
         
         v_initial_placement_quiz_id := null;
+
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before querying removal_locations for initial_placement_quiz_id, current time = %', current_t;*/
 
         select initial_placement_quiz_id, provider_type 
         into v_initial_placement_quiz_id, v_initial_placement_setting
         from removal_locations
         where id = v_first_rem_loc_id;
 
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before calling get_from_initial_placement_quiz, current time = %', current_t;*/
+
         perform get_from_initial_placement_quiz(kid_with_rem_ep.child_id, 
-                  kid_with_rem_ep.episode_number, v_initial_placement_quiz_id); 
+                  kid_with_rem_ep.episode_number, v_initial_placement_quiz_id);
+
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before calling case_county_for_kids_like_my_kids, current time = %', current_t;*/
+
         perform case_county_for_kids_like_my_kids(kid_with_rem_ep.child_id, 
                   kid_with_rem_ep.episode_number);
         /*perform from_abuse_quizzes(kid_with_rem_ep.child_id, 
                   kid_with_rem_ep.episode_number);*/
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before calling get_domestic_violence, current time = %', current_t;*/
+
         perform get_domestic_violence(kid_with_rem_ep.child_id, 
                   kid_with_rem_ep.episode_number);
-        perform code_child_race(kid_with_rem_ep.child_id, 
-                  kid_with_rem_ep.episode_number,kid_with_rem_ep.multi_racial,kid_with_rem_ep.white,kid_with_rem_ep.black,
-                  kid_with_rem_ep.american_indian,kid_with_rem_ep.pacific_islander,kid_with_rem_ep.asian);
+
+        /*select substring(timeofday() from 1 for 26) into current_t;
+        raise notice 'before updating klmk_metrics, current time = %', current_t;*/
+
         update klmk_metrics
         set count_previous_removal_episodes = n_previous_removal_episodes,
             initial_placement_setting = v_initial_placement_setting

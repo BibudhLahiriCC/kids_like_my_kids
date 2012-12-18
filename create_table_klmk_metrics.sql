@@ -3,7 +3,6 @@ create table klmk_metrics(
  child_id bigint,
  episode_number integer,
  gender smallint, 
- age_category smallint,
  black smallint,
  white smallint,
  american_indian smallint,
@@ -24,3 +23,9 @@ create table klmk_metrics(
  count_previous_removal_episodes smallint,
  initial_placement_setting varchar(255)
 );
+
+CREATE INDEX klmk_metrics_child_id_episode_number
+  ON klmk_metrics
+  USING btree
+  (child_id, episode_number);
+
