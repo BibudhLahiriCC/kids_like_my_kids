@@ -3,83 +3,93 @@ poss_perm_outcomes <<- NA;
 classify_for_exit_SVM <- function()
 {
   library(RPostgreSQL);
-  con <- dbConnect(PostgreSQL(), user="bibudh", host="199.91.168.116", 
-                   port="5438", dbname="casebook2_production");
+  con <- dbConnect(PostgreSQL(), user="blahiri", password = "abc675", 
+                   host = "localhost", port="5442", dbname="analytics");
   initial_months <- 6;
-  statement <- paste("select re.child_id || '_' || re.episode_number as child_id_episode_number, ",
-                     "age_category, american_indian, asian, black, ",
-                     "case when child_disability = 't' then 1 ",
-                           "when child_disability = 'f' then 0 ",
-                           "else null ",
-                     "end as child_disability,",
-                     "count_previous_removal_episodes, family_structure_married_couple, ",
-                     "family_structure_single_female, ",
-                     "case when parent_alcohol_abuse = 't' then 1 ",
-                           "when parent_alcohol_abuse = 'f' then 0 ",
-                           "else null ",
-                     "end as parent_alcohol_abuse,",
-                     "case when parent_drug_abuse = 't' then 1 ",
-                           "when parent_drug_abuse = 'f' then 0 ",
-                           "else null ",
-                     "end as parent_drug_abuse,", 
-                     "white, (re.end_date - re.start_date) as length_of_stay, ",
-                     "(select count(*) from removal_locations rl ",
-                     " where re.child_id = rl.person_id ",
-                     " and rl.type = 'RemovalLocation::Placement' ",
-                     " and date(rl.started_at) >= re.start_date ",
-                     "and (rl.ended_at is null or date(rl.ended_at) <= re.end_date)) as n_placements, ",
-                     "(select count(*) from removal_locations rl ",
-                     " where re.child_id = rl.person_id ",
-                     " and rl.type = 'RemovalLocation::Placement' ",
-                     " and date(rl.started_at) between re.start_date ",
-                     " and (re.start_date + ", initial_months, "*30)) as n_plcmnts_in_initial_months, ",
-                     "case when fn_remove_legacy(permanency_outcome) = 'Child is entering the Collaborative Care Program' then 'entering_cc'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Runaway with Wardship Dismissed' then 'runaway'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Transfer of Placement and Care to Another Indiana State Agency' then 'tpa'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Permanent Placement with a Relative' then 'relative'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Death of Child' then 'death'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Reunification' then 'reunification'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Legally Removed from Parent(s)' then 'legally_removed'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Rights Terminated for Parent(s)' then 'tpr'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Adoption' then 'adoption'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Emancipation' then 'emancipation'",
-                                "when fn_remove_legacy(permanency_outcome) = 'Guardianship' then 'guardianship'",
-                                "else permanency_outcome",
-                     " end as processed_permanency_outcome",
-                     " from klmk_metrics km, removal_episodes re, ", 
-                     "court_hearings ch, court_hearing_outcomes cho ",
-                     " where km.child_id = re.child_id",
-                     " and km.episode_number = re.episode_number ",
-                     " and re.end_date is not null", 
-                     " and age_category is not null ",
-                     " and american_indian is not null ",
-                     " and asian is not null ",
-                     " and black is not null ",
-                     " and child_disability is not null ",
-                     " and family_structure_married_couple is not null ",
-                     " and family_structure_single_female is not null ",
-                     " and parent_alcohol_abuse is not null ",
-                     " and parent_drug_abuse is not null ",
-                     " and white is not null ",
-                     " and re.child_id = ch.person_id",
-                     " and ch.id = cho.court_hearing_id",
-                     " and re.end_date = ch.date ",
-                     " and permanency_outcome is not null",
+  statement <- paste("select cast(re.focus_child_id as text) || ",
+                     "cast(re.number as text) child_id_episode_number, ",
+                     "re.focus_child_id child_id, re.number episode_number, ",
+                     "case when fc.gender = 'Male' then 1 ",
+                     "    when fc.gender = 'Female' then 0 ",
+                     "    else null ",
+                     "end as gender, ",
+                     "duration_in_days length_of_stay, ",
+                     "extract(year from age(start_dates.sql_date, fc.date_of_birth)) as age_in_years, ",
+                     "case when fc.race = 'Multi Racial' then 1 else 0 ",
+                     "end as multi_racial,",
+                     "case when fc.race = 'American Indian or Alaska Native' then 1 else 0 ",
+                     "end as american_indian,",
+                     "case when fc.race = 'White' then 1 else 0 ",
+                     "end as white,",
+                     "case when fc.race = 'Black' then 1 else 0 ",
+                     "end as black, ",
+                     "case when fc.race = 'Hawaiian / Pacific Islander' then 1 else 0 ",
+                     "end as pacific_islander, ",
+                     "case when fc.race = 'Asian' then 1 else 0 ",
+                     "end as asian, ",
+                     "case when parent_alcohol_abuse = 't' then 1 else 0 ",
+                     "end as parent_alcohol_abuse, ",
+                     "case when parent_drug_abuse = 't' then 1 else 0 ",
+                     "end as parent_drug_abuse, ",
+                     "case when child_behavioral_problem = 't' then 1 else 0 ",
+                     "end as child_behavioral_problem, ",
+                     "case when child_disability = 't' then 1 else 0 ",
+                     "end as child_disability, ",
+                     "case when physical_abuse = 't' then 1 else 0 ",
+                     "end as physical_abuse,  ",
+                     "case when sexual_abuse = 't' then 1 else 0 ",
+                     "end as sexual_abuse, ",
+                     "case when neglect = 't' then 1 else 0 ",
+                     "end as neglect, ",
+                     "case when child_alcohol_abuse = 't' then 1 else 0 ",
+                     "end as child_alcohol_abuse, ",
+                     "case when parent_alcohol_abuse = 't' then 1 else 0 ",
+                     "end as parent_alcohol_abuse, ",
+                     "case when parent_drug_abuse = 't' then 1 else 0 ",
+                     "end as parent_drug_abuse, ",
+                     "case when child_behavioral_problem = 't' then 1 else 0 ",
+                     "end as child_behavioral_problem, ",
+                     "case when death_of_parent = 't' then 1 else 0 ",
+                     "end as death_of_parent, ",
+                     "case when incarceration_of_parent = 't' then 1 else 0 ",
+                     "end as incarceration_of_parent, ",
+                     "case when caretaker_inability_to_cope = 't' then 1 else 0 ",
+                     "end as caretaker_inability_to_cope, ",
+                     "case when abandonment = 't' then 1 else 0 ",
+                     "end as abandonment, ",
+                     "case when relinquishment = 't' then 1 else 0 ",
+                     "end as relinquishment, ",
+                     "case when child_drug_abuse = 't' then 1 else 0 ",
+                     "end as child_drug_abuse, ",
+                     "case when inadequate_housing = 't' then 1 else 0 ",
+                     "end as inadequate_housing, ",
+                     "case when fs.description = 'Single Female Family' then 1 else 0 ",
+                     "end as family_structure_single_female, ",
+                     "case when fs.description = 'Single Male Family' then 1 else 0 ",
+                     "end as family_structure_single_male, ",
+                     "case when fs.description = 'Married Couple' then 1 else 0 ",
+                     "end as family_structure_married_couple, ",
+                     "case when fs.description = 'Unmarried Couple' then 1 else 0 ",
+                     "end as family_structure_unmarried_couple, ",
+                     "eeh.permanency_outcome processed_permanency_outcome",
+                     " from removal_episodes re inner join focus_children fc on (re.focus_child_id = fc.id) ", 
+                     "    inner join reason_for_removals rfr on (re.reason_for_removal_id = rfr.id) ",
+                     "    inner join family_structures fs on (re.family_structure_id = fs.id) ",
+                     "    inner join episode_ending_hearings eeh on (re.episode_ending_hearing_id = eeh.id) ",
+                     "    inner join dates start_dates on (start_date_id = start_dates.id) ",
+                     "where fc.gender is not null and fc.gender <> 'Unknown' ",
+                     "and fc.date_of_birth is not null ",
+                     "and to_char(start_dates.sql_date, 'YYYY') >= '2008' ",
+                     #"limit 100",
                       sep = "");
 
   res <- dbSendQuery(con, statement);
   kids_with_permanency <- fetch(res, n = -1);
   cat(paste("nrow(kids_with_permanency) = ", nrow(kids_with_permanency), "\n", sep = ""));
 
-  kids_with_permanency$age_category_1 <- as.numeric(kids_with_permanency$age_category == 2);
-  kids_with_permanency$age_category_2 <- as.numeric(kids_with_permanency$age_category == 3);
-  kids_with_permanency$age_category_3 <- as.numeric(kids_with_permanency$age_category == 4);
-  kids_with_permanency$age_category_4 <- as.numeric(kids_with_permanency$age_category == 5);
- 
-  kids_with_permanency <- oversample_undersample(kids_with_permanency);
-  best_model <- cross_validate(kids_with_permanency, 5);
+  #kids_with_permanency <- oversample_undersample(kids_with_permanency);
+  best_model <- cross_validate(kids_with_permanency, 2);
   #classify(kids_with_permanency, poss_perm_outcomes);
-  #pies_by_dimensions(kids_with_permanency);
 
   #model <- classify_simple(kids_with_permanency);
   #grid_search_for_gaussian(kids_with_permanency, 5);
@@ -126,17 +136,17 @@ classify <- function(kids_with_permanency, poss_perm_outcomes, original_permanen
   library(e1071);
   n_poss_perm_outcomes <- length(poss_perm_outcomes);
   y <- kids_with_permanency$processed_permanency_outcome;
-  columns_to_remove <- c("age_category", "child_id_episode_number", 
-                       "processed_permanency_outcome"
-                      ,"random_number", "sampled"
-                       );
+  #columns_to_remove <- c("child_id_episode_number", "processed_permanency_outcome","random_number", "sampled");
+  columns_to_remove <- c("child_id_episode_number", "processed_permanency_outcome");
 
   kids_with_permanency <- 
    kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)];
+  cat(paste(Sys.time(), "\n", sep = ""));
   model <- svm(kids_with_permanency, y, type = "C-classification",
                #cost = 16, gamma = 0.0078125);
                #cost = 512, gamma = 0.0009765625);
-               kernel = "linear", cost = 8);
+               kernel = "linear");
+  cat(paste(Sys.time(), "\n", sep = ""));
   
   #Bring back the original permanency outcomes.
   kids_with_permanency$predicted_perm_outcome <- predict(model, kids_with_permanency);
@@ -170,12 +180,15 @@ compute_precision_recall <- function(kids_with_permanency, poss_perm_outcomes, n
                                         c("Micro-avg-precision", "Total_predicted"));
   colnames(precision_recall_matrix) <- append(poss_perm_outcomes, 
                                         c("Micro-avg-recall", "Total_actual"));
+  cat(paste("n_poss_perm_outcomes = ", n_poss_perm_outcomes, "\n", sep = ""));
   for (i in 1:n_poss_perm_outcomes)
   {
     actual_outcome <- poss_perm_outcomes[i];
     for (j in 1:n_poss_perm_outcomes)
     {
       predicted_outcome <- poss_perm_outcomes[j];
+      cat("i = ", i, ", j = ", j, ", actual_outcome = ", actual_outcome, ", predicted_outcome = ",
+           predicted_outcome, "\n");
       precision_recall_matrix[actual_outcome, predicted_outcome] <- 
         sum(((kids_with_permanency[, "processed_permanency_outcome"] == actual_outcome)
             & (kids_with_permanency[, "predicted_perm_outcome"] == predicted_outcome)));
@@ -286,6 +299,10 @@ oversample_undersample <- function(kids_with_permanency)
   cross_validate <- function(kids_with_permanency, k)
   {
    original_permanency_outcomes <- kids_with_permanency$processed_permanency_outcome;
+
+   #Adding this line as undersampling is no longer done.
+   poss_perm_outcomes <- unique(kids_with_permanency$processed_permanency_outcome);
+
    fraction_of_training_data <- 0.8;
    
    #Training dataset is 1..training_data_size in the original dataset
@@ -330,10 +347,10 @@ oversample_undersample <- function(kids_with_permanency)
                             (training_data_size+1), 
                             nrow(kids_with_permanency));
 
-     columns_to_remove <- c("age_category", "child_id_episode_number", 
-                       "processed_permanency_outcome"
-                      ,"random_number", "sampled"
-                       );
+     #columns_to_remove <- c("processed_permanency_outcome","random_number", "sampled");
+     #Since we are not undersampling now.
+     columns_to_remove <- c("child_id_episode_number", "processed_permanency_outcome");
+
 
      validation_set_this_fold <- 
          validation_set_this_fold[, !(colnames(validation_set_this_fold) %in% columns_to_remove)];
@@ -368,6 +385,7 @@ oversample_undersample <- function(kids_with_permanency)
       classification_accuracy_test_data <- (sum(test_data$processed_permanency_outcome 
                                                 == test_data$predicted_perm_outcome))/
                                             nrow(test_data);
+      print(poss_perm_outcomes);
       compute_precision_recall(test_data, poss_perm_outcomes, n_poss_perm_outcomes);
       cat(paste("Over test set, classification_accuracy = ", 
                 round(classification_accuracy_test_data, 2), 
@@ -532,3 +550,58 @@ grid_search_for_linear <- function(kids_with_permanency, k)
   cat(paste("best_C = ", best_C, "\n", sep = ""));
 }
 
+
+#Take all subsets of size 2 from the set of predictors, and take each major category at a time,
+#and plot the data points with different colors depending on the major categories they belong to. 
+plot_before_classification <- function(kids_with_permanency)
+{
+  count_by_perm_outcome <- aggregate(x = kids_with_permanency$child_id_episode_number, 
+                        by = list(kids_with_permanency$processed_permanency_outcome), FUN = "length");
+  colnames(count_by_perm_outcome) <- c("processed_permanency_outcome", "frequency");
+  print(count_by_perm_outcome);
+  n_top_categories <- 3;
+  count_by_perm_outcome <- count_by_perm_outcome[1:n_top_categories,];
+
+  columns_to_remove <- c("age_category_1", "age_category_2",
+                         "age_category_3", "age_category_4", "child_id_episode_number", 
+                         "random_number", "sampled"
+                         );
+
+  kids_with_permanency <- 
+     kids_with_permanency[, !(colnames(kids_with_permanency) %in% columns_to_remove)]; 
+  covariates <- colnames(kids_with_permanency);
+  covariates <- covariates[!covariates == 'processed_permanency_outcome'];
+  print(covariates);
+  n_covariates <- length(covariates);
+  for (i in 1:(n_covariates-1))
+  {
+    for (j in (i+1):n_covariates)
+    {
+      for (l in 1:n_top_categories)
+      {
+        this_category <- count_by_perm_outcome[l, 1];
+        #All data points with processed_permanency_outcome = this_category are 
+        #plotted as positive, rest of the data points as negative
+        belongs_to_this_category <- 
+          sum(kids_with_permanency$processed_permanency_outcome == this_category);
+        belongs_to_other_category <- nrow(kids_with_permanency) - belongs_to_this_category;
+        cat(paste("covariate1 = ", covariates[i], ", covariate2 = ", 
+                covariates[j], ", this_category = ", this_category, 
+                ", belongs_to_this_category = ", belongs_to_this_category, 
+                ", belongs_to_other_category = ", belongs_to_other_category,
+                "\n", sep = ""));
+        if (FALSE)
+        {
+          filename <- paste("./classification_plots/", covariates[i], "_", 
+                            covariates[j], "_", this_category, sep = "");
+          png(filename,  width = 920, height = 960, units = "px");
+          plot(kids_with_permanency[, covariates[i]], 
+               kids_with_permanency[, covariates[j]],
+               bg = c("green", "red")[unclass(kids_with_permanency$belongs_to_this_category)],
+               main = this_category, xlab = covariates[i], ylab = covariates[j]);
+          dev.off();
+        }
+      }
+    }
+  }
+}
